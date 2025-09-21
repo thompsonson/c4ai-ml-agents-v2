@@ -30,24 +30,24 @@ quality-gates: test type-check format-check lint
 
 test:
 	@echo "🧪 Running tests..."
-	pytest
+	uv run pytest
 
 type-check:
 	@echo "🔍 Running type checks..."
-	mypy src/ml_agents_v2
+	uv run mypy src/ml_agents_v2
 
 format-check:
 	@echo "📐 Checking code formatting..."
-	black --check --diff src/ tests/
+	uv run black --check --diff src/ tests/
 
 lint:
 	@echo "🔧 Running linter..."
-	ruff check src/ tests/
+	uv run ruff check src/ tests/
 
 # Development helpers
 format:
 	@echo "🎨 Formatting code..."
-	black src/ tests/
+	uv run black src/ tests/
 
 # Clean up
 clean:

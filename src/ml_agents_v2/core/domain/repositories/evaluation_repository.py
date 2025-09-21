@@ -16,7 +16,7 @@ class EvaluationRepository(ABC):
     """
 
     @abstractmethod
-    async def save(self, evaluation: Evaluation) -> None:
+    def save(self, evaluation: Evaluation) -> None:
         """Persist an evaluation entity.
 
         Args:
@@ -27,21 +27,21 @@ class EvaluationRepository(ABC):
         """
 
     @abstractmethod
-    async def get_by_id(self, evaluation_id: uuid.UUID) -> Evaluation | None:
+    def get_by_id(self, evaluation_id: uuid.UUID) -> Evaluation:
         """Retrieve evaluation by ID.
 
         Args:
             evaluation_id: Unique identifier of the evaluation
 
         Returns:
-            Evaluation entity if found, None otherwise
+            Evaluation entity
 
         Raises:
             RepositoryError: If retrieval fails
         """
 
     @abstractmethod
-    async def list_by_status(self, status: str) -> list[Evaluation]:
+    def list_by_status(self, status: str) -> list[Evaluation]:
         """List evaluations by status.
 
         Args:
@@ -55,7 +55,7 @@ class EvaluationRepository(ABC):
         """
 
     @abstractmethod
-    async def list_by_benchmark_id(self, benchmark_id: uuid.UUID) -> list[Evaluation]:
+    def list_by_benchmark_id(self, benchmark_id: uuid.UUID) -> list[Evaluation]:
         """List evaluations for a specific benchmark.
 
         Args:
@@ -69,7 +69,7 @@ class EvaluationRepository(ABC):
         """
 
     @abstractmethod
-    async def update(self, evaluation: Evaluation) -> None:
+    def update(self, evaluation: Evaluation) -> None:
         """Update an existing evaluation.
 
         Args:
@@ -81,7 +81,7 @@ class EvaluationRepository(ABC):
         """
 
     @abstractmethod
-    async def delete(self, evaluation_id: uuid.UUID) -> None:
+    def delete(self, evaluation_id: uuid.UUID) -> None:
         """Delete an evaluation by ID.
 
         Args:
@@ -93,7 +93,7 @@ class EvaluationRepository(ABC):
         """
 
     @abstractmethod
-    async def exists(self, evaluation_id: uuid.UUID) -> bool:
+    def exists(self, evaluation_id: uuid.UUID) -> bool:
         """Check if evaluation exists.
 
         Args:
@@ -107,7 +107,7 @@ class EvaluationRepository(ABC):
         """
 
     @abstractmethod
-    async def list_all(self, limit: int | None = None) -> list[Evaluation]:
+    def list_all(self, limit: int | None = None) -> list[Evaluation]:
         """List all evaluations with optional limit.
 
         Args:

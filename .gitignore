@@ -64,6 +64,7 @@ ipython_config.py
 *.db
 *.sqlite
 *.sqlite3
+data/
 
 # IDE
 .vscode/

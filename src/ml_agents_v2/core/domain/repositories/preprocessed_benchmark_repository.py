@@ -18,7 +18,7 @@ class PreprocessedBenchmarkRepository(ABC):
     """
 
     @abstractmethod
-    async def save(self, benchmark: PreprocessedBenchmark) -> None:
+    def save(self, benchmark: PreprocessedBenchmark) -> None:
         """Persist a preprocessed benchmark entity.
 
         Args:
@@ -29,35 +29,37 @@ class PreprocessedBenchmarkRepository(ABC):
         """
 
     @abstractmethod
-    async def get_by_id(self, benchmark_id: uuid.UUID) -> PreprocessedBenchmark | None:
+    def get_by_id(self, benchmark_id: uuid.UUID) -> PreprocessedBenchmark:
         """Retrieve benchmark by ID.
 
         Args:
             benchmark_id: Unique identifier of the benchmark
 
         Returns:
-            PreprocessedBenchmark entity if found, None otherwise
+            PreprocessedBenchmark entity
 
         Raises:
             RepositoryError: If retrieval fails
+            EntityNotFoundError: If benchmark not found
         """
 
     @abstractmethod
-    async def get_by_name(self, name: str) -> PreprocessedBenchmark | None:
+    def get_by_name(self, name: str) -> PreprocessedBenchmark:
         """Retrieve benchmark by name.
 
         Args:
             name: Name of the benchmark
 
         Returns:
-            PreprocessedBenchmark entity if found, None otherwise
+            PreprocessedBenchmark entity
 
         Raises:
             RepositoryError: If retrieval fails
+            EntityNotFoundError: If benchmark not found
         """
 
     @abstractmethod
-    async def list_by_format_version(
+    def list_by_format_version(
         self, format_version: str
     ) -> list[PreprocessedBenchmark]:
         """List benchmarks by format version.
@@ -73,7 +75,7 @@ class PreprocessedBenchmarkRepository(ABC):
         """
 
     @abstractmethod
-    async def search_by_metadata(
+    def search_by_metadata(
         self, metadata_filters: dict[str, Any]
     ) -> list[PreprocessedBenchmark]:
         """Search benchmarks by metadata criteria.
@@ -89,7 +91,7 @@ class PreprocessedBenchmarkRepository(ABC):
         """
 
     @abstractmethod
-    async def update(self, benchmark: PreprocessedBenchmark) -> None:
+    def update(self, benchmark: PreprocessedBenchmark) -> None:
         """Update an existing benchmark.
 
         Args:
@@ -101,7 +103,7 @@ class PreprocessedBenchmarkRepository(ABC):
         """
 
     @abstractmethod
-    async def delete(self, benchmark_id: uuid.UUID) -> None:
+    def delete(self, benchmark_id: uuid.UUID) -> None:
         """Delete a benchmark by ID.
 
         Args:
@@ -113,7 +115,7 @@ class PreprocessedBenchmarkRepository(ABC):
         """
 
     @abstractmethod
-    async def exists(self, benchmark_id: uuid.UUID) -> bool:
+    def exists(self, benchmark_id: uuid.UUID) -> bool:
         """Check if benchmark exists.
 
         Args:
@@ -127,7 +129,7 @@ class PreprocessedBenchmarkRepository(ABC):
         """
 
     @abstractmethod
-    async def list_all(self, limit: int | None = None) -> list[PreprocessedBenchmark]:
+    def list_all(self, limit: int | None = None) -> list[PreprocessedBenchmark]:
         """List all benchmarks with optional limit.
 
         Args:
@@ -141,7 +143,7 @@ class PreprocessedBenchmarkRepository(ABC):
         """
 
     @abstractmethod
-    async def get_summary_stats(self) -> dict[str, Any]:
+    def get_summary_stats(self) -> dict[str, Any]:
         """Get summary statistics about stored benchmarks.
 
         Returns:

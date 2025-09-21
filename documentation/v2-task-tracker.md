@@ -13,18 +13,18 @@
 - [x] Chain of Thought agent implementation
 - [x] Repository interfaces (EvaluationRepository, BenchmarkRepository)
 
-## Phase 2: Infrastructure Setup
+## Phase 2: Infrastructure Setup ✅ COMPLETED
 
-- [ ] ApplicationConfig with environment variables
-- [ ] Database models (SQLAlchemy)
-- [ ] Alembic migration setup and initial schema
-- [ ] Dependency injection container
-- [ ] Structured logging configuration
-- [ ] Repository implementations
-- [ ] OpenRouter client integration
-- [ ] Error mapping (OpenRouter → FailureReason)
-- [ ] BENCHMARK_REGISTRY constant and mapping logic
-- [ ] Health check service (database + OpenRouter connectivity)
+- [x] ApplicationConfig with environment variables
+- [x] Database models (SQLAlchemy)
+- [x] Alembic migration setup and initial schema
+- [x] Dependency injection container
+- [x] Structured logging configuration
+- [x] Repository implementations
+- [x] OpenRouter client integration
+- [x] Error mapping (OpenRouter → FailureReason)
+- [x] BENCHMARK_REGISTRY constant and mapping logic
+- [x] Health check service (database + OpenRouter connectivity)
 
 ## Phase 3: Application Services
 

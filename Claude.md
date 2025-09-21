@@ -9,7 +9,7 @@ ML Agents v2 is a reasoning research platform built using Domain-Driven Design p
 ### Before ANY code changes:
 
 ```bash
-make test && make type-check && make format-check && make lint
+make quality-gates
 ```
 
 ### After EVERY code change:

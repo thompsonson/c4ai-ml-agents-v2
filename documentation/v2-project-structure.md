@@ -65,18 +65,27 @@ ml_agents_v2/
 │       │   ├── __init__.py
 │       │   ├── database/
 │       │   │   ├── __init__.py
-│       │   │   ├── models.py   # SQLAlchemy models
+│       │   │   ├── base.py     # SQLAlchemy base configuration
+│       │   │   ├── session_manager.py  # Database session management
+│       │   │   ├── models/     # SQLAlchemy models
+│       │   │   │   ├── __init__.py
+│       │   │   │   ├── evaluation.py
+│       │   │   │   └── benchmark.py
 │       │   │   ├── repositories/
 │       │   │   │   ├── __init__.py
 │       │   │   │   ├── evaluation_repository_impl.py
 │       │   │   │   └── benchmark_repository_impl.py
 │       │   │   └── migrations/
+│       │   │       ├── env.py
+│       │   │       ├── script.py.mako
+│       │   │       └── versions/
 │       │   ├── openrouter/
 │       │   │   ├── __init__.py
 │       │   │   ├── client.py
-│       │   │   ├── error_mapper.py
-│       │   │   └── model_registry.py
-│       │   └── container.py    # Dependency injection
+│       │   │   └── error_mapper.py
+│       │   ├── container.py    # Dependency injection
+│       │   ├── health.py       # Health check service
+│       │   └── logging_config.py  # Structured logging setup
 │       └── cli/                # CLI interface
 │           ├── __init__.py
 │           ├── main.py         # Click command groups
@@ -200,16 +209,17 @@ class ApplicationConfig(BaseSettings):
 ### Migration Scripts
 
 ```
-alembic/versions/
-├── 001_initial_schema.py
-├── 002_add_failure_reason.py
-└── 003_add_indexes.py
+src/ml_agents_v2/infrastructure/database/migrations/versions/
+└── 8312ef6ff4bf_initial_schema_with_evaluations_and_.py
 ```
 
 ### Model Mapping
 
-- Domain entities → SQLAlchemy models in `infrastructure/database/models.py`
+- Domain entities → SQLAlchemy models in `infrastructure/database/models/`
+  - `Evaluation` entity → `models/evaluation.py`
+  - `PreprocessedBenchmark` entity → `models/benchmark.py`
 - Repository interfaces → Implementations in `infrastructure/database/repositories/`
+- Database session management → `infrastructure/database/session_manager.py`
 
 ## Entry Points
 
