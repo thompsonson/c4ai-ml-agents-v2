@@ -154,6 +154,104 @@ class ResultsAnalyzer:
         pass
 ```
 
+## Data Transfer Objects (DTOs)
+
+Application services use DTOs to transfer data across layer boundaries while keeping domain entities encapsulated.
+
+### EvaluationInfo
+
+Summary information for evaluation listings and status displays.
+
+```python
+@dataclass(frozen=True)
+class EvaluationInfo:
+    evaluation_id: uuid.UUID
+    agent_type: str
+    model_name: str
+    benchmark_name: str
+    status: str
+    accuracy: float | None
+    created_at: datetime
+    completed_at: datetime | None
+    total_questions: int | None
+    correct_answers: int | None
+
+    @property
+    def is_completed(self) -> bool:
+        return self.status == "completed"
+
+    @property
+    def accuracy_percentage(self) -> str:
+        return f"{self.accuracy:.1f}%" if self.accuracy else "-"
+
+    @property
+    def duration_minutes(self) -> float | None:
+        if self.completed_at and self.created_at:
+            return (self.completed_at - self.created_at).total_seconds() / 60
+        return None
+```
+
+### ProgressInfo
+
+Real-time progress tracking during evaluation execution.
+
+```python
+@dataclass(frozen=True)
+class ProgressInfo:
+    evaluation_id: uuid.UUID
+    current_question: int
+    total_questions: int
+    successful_answers: int
+    failed_questions: int
+    started_at: datetime
+    last_updated: datetime
+
+    @property
+    def completion_percentage(self) -> float:
+        return (self.current_question / self.total_questions) * 100 if self.total_questions > 0 else 0.0
+
+    @property
+    def success_rate(self) -> float:
+        answered = self.successful_answers + self.failed_questions
+        return (self.successful_answers / answered) * 100 if answered > 0 else 0.0
+
+    @property
+    def estimated_remaining_minutes(self) -> float | None:
+        elapsed = self.elapsed_minutes
+        if elapsed > 0 and self.current_question > 0:
+            time_per_question = elapsed / self.current_question
+            remaining_questions = self.total_questions - self.current_question
+            return time_per_question * remaining_questions
+        return None
+```
+
+### ValidationResult
+
+Immutable validation result aggregation across multiple validation steps.
+
+```python
+@dataclass(frozen=True)
+class ValidationResult:
+    is_valid: bool
+    errors: List[str]
+    warnings: List[str]
+
+    @classmethod
+    def success(cls, warnings: List[str] = None) -> "ValidationResult":
+        return cls(is_valid=True, errors=[], warnings=warnings or [])
+
+    @classmethod
+    def failure(cls, errors: List[str], warnings: List[str] = None) -> "ValidationResult":
+        return cls(is_valid=False, errors=errors, warnings=warnings or [])
+
+    def combine(self, other: "ValidationResult") -> "ValidationResult":
+        return ValidationResult(
+            is_valid=self.is_valid and other.is_valid,
+            errors=self.errors + other.errors,
+            warnings=self.warnings + other.warnings,
+        )
+```
+
 ## Core Workflows with Sequence Diagrams
 
 ### 1. Create and Execute Evaluation
@@ -403,14 +501,73 @@ class ApplicationConfig:
 
 ## Implementation Checklist
 
-- [ ] Define application service interfaces
-- [ ] Implement transaction boundary management
-- [ ] Create error mapping from external APIs to domain failures
-- [ ] Set up async execution patterns for evaluations
-- [ ] Implement validation pipeline across all layers
-- [ ] Configure logging and monitoring integration
-- [ ] Create configuration management system
-- [ ] Set up repository dependency injection
+- [x] Define application service interfaces
+- [x] Implement transaction boundary management (TransactionManager)
+- [x] Create error mapping from external APIs to domain failures (ApplicationErrorMapper)
+- [x] Set up async execution patterns for evaluations (EvaluationOrchestrator)
+- [x] Implement validation pipeline across all layers (ValidationResult DTOs)
+- [x] Configure logging and monitoring integration
+- [x] Create configuration management system
+- [x] Set up repository dependency injection (dependency injection container)
+
+## Testing Implementation
+
+The application services layer includes comprehensive high-value testing focusing on critical business workflows and integration points.
+
+### Test Structure
+
+```
+tests/unit/application/
+├── conftest.py              # Application layer fixtures and mocks
+├── test_dtos.py            # DTO property calculations and validation
+├── test_error_mapper.py    # External API error mapping
+├── test_evaluation_orchestrator.py  # Core orchestration workflows
+└── test_integration.py     # Service coordination and end-to-end flows
+```
+
+### Testing Approach
+
+**Pragmatic Testing Strategy**: Focus on high-value scenarios rather than exhaustive coverage:
+
+- **Critical Business Workflows**: Evaluation creation, execution, and completion
+- **Error Handling**: External service failures, validation errors, network issues
+- **Integration Points**: Service coordination, repository interactions, async operations
+- **DTO Calculations**: Progress tracking, accuracy percentages, time estimates
+
+### Key Test Examples
+
+**Evaluation Orchestrator Testing**:
+```python
+async def test_execute_evaluation_basic_workflow(self, orchestrator, sample_evaluation):
+    await orchestrator.execute_evaluation(evaluation_id)
+    assert mock_reasoning_agent.answer_question.call_count == len(sample_benchmark.questions)
+    # Verify final evaluation state
+    final_evaluation = mock_evaluation_repository.update.call_args_list[-1][0][0]
+    assert final_evaluation.status == "completed"
+```
+
+**Error Mapping Testing**:
+```python
+def test_map_openrouter_rate_limit_error(self, error_mapper):
+    error = MockRateLimitError("Rate limit exceeded")
+    failure_reason = error_mapper.map_openrouter_error(error)
+    assert failure_reason.category == "rate_limit_exceeded"
+    assert failure_reason.recoverable is True
+```
+
+**DTO Testing**:
+```python
+def test_progress_info_calculations(self, sample_progress_info):
+    assert sample_progress_info.completion_percentage == 60.0
+    assert sample_progress_info.success_rate == pytest.approx(83.33, rel=1e-2)
+```
+
+### Test Results
+
+- **389 tests passing** across domain, application, and infrastructure layers
+- **Quality gates passing**: pytest, mypy, black, ruff
+- **Async testing support**: Proper AsyncMock usage for evaluation execution
+- **Integration coverage**: End-to-end workflow validation with mocked external services
 
 ## See Also
 

@@ -3,6 +3,15 @@
 from dependency_injector import containers, providers
 
 from ml_agents_v2.config.application_config import get_config
+from ml_agents_v2.core.application.services.benchmark_processor import (
+    BenchmarkProcessor,
+)
+from ml_agents_v2.core.application.services.evaluation_orchestrator import (
+    EvaluationOrchestrator,
+)
+from ml_agents_v2.core.application.services.results_analyzer import (
+    ResultsAnalyzer,
+)
 from ml_agents_v2.core.domain.services.reasoning.reasoning_agent_factory import (
     ReasoningAgentFactory,
 )
@@ -73,17 +82,21 @@ class Container(containers.DeclarativeContainer):
         openrouter_client=openrouter_client,
     )
 
-    # Application Services will be added in Phase 3
-    # evaluation_orchestrator = providers.Factory(
-    #     EvaluationOrchestrator,
-    #     config=config,
-    #     evaluation_repository=evaluation_repository,
-    #     benchmark_repository=benchmark_repository,
-    #     reasoning_service_factory=reasoning_agent_factory
-    # )
+    # Application Services
+    evaluation_orchestrator = providers.Factory(
+        EvaluationOrchestrator,
+        evaluation_repository=evaluation_repository,
+        benchmark_repository=benchmark_repository,
+        reasoning_agent_factory=reasoning_agent_factory,
+    )
 
-    # benchmark_processor = providers.Factory(
-    #     BenchmarkProcessor,
-    #     config=config,
-    #     benchmark_repository=benchmark_repository
-    # )
+    benchmark_processor = providers.Factory(
+        BenchmarkProcessor,
+        benchmark_repository=benchmark_repository,
+    )
+
+    results_analyzer = providers.Factory(
+        ResultsAnalyzer,
+        evaluation_repository=evaluation_repository,
+        benchmark_repository=benchmark_repository,
+    )
