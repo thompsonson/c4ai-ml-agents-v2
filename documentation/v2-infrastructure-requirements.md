@@ -28,7 +28,9 @@ dependencies = [
     "python-dotenv>=1.0.0",      # Environment variable management
     "openai>=1.51.0",            # OpenRouter compatible async client
     "httpx>=0.25.0",             # Async HTTP client for direct API calls
-    "pydantic>=2.5.0",           # Configuration validation
+    "pydantic>=2.5.0",           # Configuration validation and structured output
+    "instructor>=1.3.0",         # Structured output parsing
+    "structured-logprobs>=0.1.0", # Confidence scoring with logprobs
     "sqlalchemy>=2.0.0",         # Database ORM
     "alembic>=1.13.0",           # Database migrations
     "structlog>=23.2.0",         # Structured logging
@@ -45,6 +47,334 @@ dev = [
     "ruff>=0.1.8",
     "mypy>=1.8.0",
 ]
+```
+
+## Structured Output Parsing Strategy
+
+### Overview
+
+The infrastructure layer uses two parsing strategies depending on model capabilities:
+
+- **Structured LogProbs**: For models supporting logprobs (OpenAI models) - provides confidence scoring
+- **Instructor**: Fallback for models without logprobs support (Anthropic, etc.) - reliable parsing without confidence
+
+### Model Capability Detection
+
+```python
+# infrastructure/model_capabilities.py
+@dataclass
+class ModelCapabilities:
+    supports_logprobs: bool
+    supports_streaming: bool
+    supports_function_calling: bool
+    max_tokens: int
+    provider: str
+
+MODEL_CAPABILITIES = {
+    "openai/gpt-4o": ModelCapabilities(
+        supports_logprobs=True,
+        supports_streaming=True,
+        supports_function_calling=True,
+        max_tokens=128000,
+        provider="openai"
+    ),
+    "anthropic/claude-3-5-sonnet-20241022": ModelCapabilities(
+        supports_logprobs=False,
+        supports_streaming=True,
+        supports_function_calling=True,
+        max_tokens=200000,
+        provider="anthropic"
+    ),
+}
+```
+
+### Parsing Strategy Implementation
+
+```python
+# infrastructure/structured_output/parsing_factory.py
+from typing import Union, Type
+from pydantic import BaseModel
+from structured_logprobs import StructuredLogProbsClient
+import instructor
+
+class StructuredLogProbsParser:
+    """Use structured-logprobs for models supporting logprobs."""
+
+    def __init__(self, openrouter_client: OpenRouterClient):
+        self.client = StructuredLogProbsClient(openrouter_client)
+
+    def _pydantic_to_json_schema(self, model: Type[BaseModel]) -> dict:
+        """Convert Pydantic model to structured-logprobs format."""
+        schema = model.model_json_schema()
+        return {
+            "type": "json_schema",
+            "json_schema": {
+                "name": model.__name__.lower(),
+                "description": model.__doc__ or f"Schema for {model.__name__}",
+                "schema": schema,
+                "strict": True
+            }
+        }
+
+    async def parse(
+        self,
+        model: Type[BaseModel],
+        prompt: str,
+        config: AgentConfig
+    ) -> dict:
+        """Parse using structured-logprobs with confidence scoring."""
+        json_schema = self._pydantic_to_json_schema(model)
+
+        response = await self.client.create(
+            model=config.model_name,
+            messages=[{"role": "user", "content": prompt}],
+            response_format=json_schema,
+            **config.model_parameters
+        )
+
+        # Extract structured data with confidence scores
+        return {
+            "parsed_data": model.model_validate(response.choices[0].message.parsed),
+            "confidence_scores": response.choices[0].logprobs,
+            "token_usage": response.usage
+        }
+
+class InstructorParser:
+    """Use instructor for models without logprobs support."""
+
+    def __init__(self, openrouter_client: OpenRouterClient):
+        self.client = instructor.from_openai(openrouter_client.client)
+
+    async def parse(
+        self,
+        model: Type[BaseModel],
+        prompt: str,
+        config: AgentConfig
+    ) -> dict:
+        """Parse using instructor with Pydantic model directly."""
+        response = await self.client.chat.completions.create(
+            model=config.model_name,
+            messages=[{"role": "user", "content": prompt}],
+            response_model=model,
+            **config.model_parameters
+        )
+
+        return {
+            "parsed_data": response,
+            "confidence_scores": None,  # Not available without logprobs
+            "token_usage": getattr(response, '_raw_response', {}).get('usage')
+        }
+
+class OutputParserFactory:
+    """Factory for creating appropriate parser based on model capabilities."""
+
+    def __init__(self, openrouter_client: OpenRouterClient):
+        self.openrouter_client = openrouter_client
+
+    def create_parser(self, model_name: str) -> Union[StructuredLogProbsParser, InstructorParser]:
+        """Create parser based on model capabilities."""
+        capabilities = MODEL_CAPABILITIES.get(model_name)
+
+        if capabilities and capabilities.supports_logprobs:
+            return StructuredLogProbsParser(self.openrouter_client)
+        else:
+            return InstructorParser(self.openrouter_client)
+```
+
+### Infrastructure Output Models
+
+```python
+# infrastructure/structured_output/models.py
+from pydantic import BaseModel, Field
+from typing import Optional
+
+class BaseReasoningOutput(BaseModel):
+    """Base class for all reasoning approach output models."""
+    answer: str = Field(description="Final answer from reasoning process")
+
+    class Config:
+        schema_extra = {
+            "required": ["answer"],
+            "additionalProperties": False
+        }
+
+class DirectAnswerOutput(BaseReasoningOutput):
+    """Infrastructure model for None agent structured output."""
+    pass
+
+class ChainOfThoughtOutput(BaseReasoningOutput):
+    """Infrastructure model for Chain of Thought structured output."""
+    reasoning: str = Field(description="Step-by-step reasoning process")
+```
+
+### ReasoningInfrastructureService Integration
+
+```python
+# infrastructure/reasoning_service.py
+class ReasoningInfrastructureService:
+    """Infrastructure service executing domain reasoning strategies."""
+
+    def __init__(
+        self,
+        openrouter_client: OpenRouterClient,
+        error_mapper: OpenRouterErrorMapper
+    ):
+        self.openrouter_client = openrouter_client
+        self.error_mapper = error_mapper
+        self.parser_factory = OutputParserFactory(openrouter_client)
+
+    async def execute_reasoning(
+        self,
+        domain_service: ReasoningAgentService,
+        question: Question,
+        config: AgentConfig
+    ) -> Union[Answer, FailureReason]:
+        """Execute domain reasoning strategy with structured output parsing."""
+        try:
+            # Domain: Get prompt strategy and output model mapping
+            prompt_strategy = domain_service.get_prompt_strategy()
+            output_model = self._get_output_model(domain_service.get_agent_type())
+
+            # Domain: Build base prompt
+            base_prompt = prompt_strategy.build_prompt(question)
+
+            # Infrastructure: Get model-specific parser
+            parser = self.parser_factory.create_parser(config.model_name)
+
+            # Infrastructure: Parse with structured output
+            start_time = time.time()
+            parse_result = await parser.parse(output_model, base_prompt, config)
+            execution_time = time.time() - start_time
+
+            # Domain: Process structured data into domain result
+            processing_metadata = {
+                "execution_time": execution_time,
+                "token_usage": parse_result.get("token_usage")
+            }
+
+            reasoning_result = domain_service.process_result(
+                self._convert_to_domain_format(parse_result["parsed_data"]),
+                processing_metadata
+            )
+
+            # Infrastructure: Convert to Answer value object
+            return self._convert_to_answer(reasoning_result)
+
+        except Exception as e:
+            # Infrastructure: Map external errors to domain failures
+            return self.error_mapper.map_to_failure_reason(e)
+
+    def _get_output_model(self, agent_type: str) -> Type[BaseReasoningOutput]:
+        """Map domain agent type to infrastructure output model."""
+        mapping = {
+            "none": DirectAnswerOutput,
+            "chain_of_thought": ChainOfThoughtOutput
+        }
+        return mapping.get(agent_type, DirectAnswerOutput)
+
+    def _convert_to_domain_format(self, pydantic_output: BaseReasoningOutput) -> dict:
+        """Convert infrastructure Pydantic model to domain-compatible format."""
+        return {
+            "final_answer": pydantic_output.answer,
+            "reasoning_text": getattr(pydantic_output, 'reasoning', ''),
+        }
+
+    def _convert_to_answer(self, result: ReasoningResult) -> Answer:
+        """Convert domain result to Answer value object."""
+        return Answer(
+            extracted_answer=result.get_answer(),
+            reasoning_trace=result.get_reasoning_trace(),
+            execution_time=result.execution_metadata.get("execution_time", 0.0),
+            token_usage=result.execution_metadata.get("token_usage"),
+            raw_response=str(result.final_answer)
+        )
+```
+
+## DET-Inspired Infrastructure Patterns
+
+### Configuration Externalization
+
+```python
+# infrastructure/prompt_config.py (Future Enhancement)
+{
+    "none": {
+        "system_prompt": "You are a helpful assistant that provides direct, concise answers.",
+        "user_prompt_template": "Answer the following question directly:\n{question_text}",
+        "output_model": "DirectAnswerOutput",
+        "model_defaults": {"temperature": 0.1, "max_tokens": 800}
+    },
+    "chain_of_thought": {
+        "system_prompt": "You are a helpful assistant that thinks step by step.",
+        "user_prompt_template": "Think through this question step by step:\n{question_text}",
+        "output_model": "ChainOfThoughtOutput",
+        "model_defaults": {"temperature": 0.8, "max_tokens": 1000}
+    }
+}
+```
+
+### Enhanced Error Handling
+
+```python
+# infrastructure/error_handling.py
+class ResponseGenerationError(Exception):
+    """Enhanced error for response generation failures."""
+
+    def __init__(self, message: str, retry_after: Optional[int] = None):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+class RetryManager:
+    """Retry logic for API failures."""
+
+    def __init__(self, max_retries: int = 3, backoff_factor: float = 2.0):
+        self.max_retries = max_retries
+        self.backoff_factor = backoff_factor
+
+    async def execute_with_retry(self, operation, *args, **kwargs):
+        """Execute operation with exponential backoff retry."""
+        for attempt in range(self.max_retries):
+            try:
+                return await operation(*args, **kwargs)
+            except (RateLimitError, APITimeoutError) as e:
+                if attempt == self.max_retries - 1:
+                    raise ResponseGenerationError(f"Max retries exceeded: {e}")
+
+                wait_time = self.backoff_factor ** attempt
+                await asyncio.sleep(wait_time)
+```
+
+### Dynamic Model Loading
+
+```python
+# infrastructure/dynamic_import.py (Future Enhancement)
+def dynamic_import(module_path: str):
+    """Dynamically import class from string path."""
+    module_name, class_name = module_path.rsplit('.', 1)
+    module = importlib.import_module(module_name)
+    return getattr(module, class_name)
+
+class EnhancedReasoningAgentFactory:
+    """Enhanced factory with dynamic loading capability."""
+
+    def __init__(self, config_path: Optional[str] = None):
+        self.config_path = config_path
+        self._load_agent_configs()
+
+    def _load_agent_configs(self):
+        """Load agent configurations from external file."""
+        if self.config_path and os.path.exists(self.config_path):
+            with open(self.config_path, 'r') as f:
+                self.agent_configs = json.load(f)
+
+    def create_service(self, agent_type: str) -> ReasoningAgentService:
+        """Create service with dynamic loading support."""
+        config = self.agent_configs.get(agent_type)
+        if config and 'service_class' in config:
+            service_class = dynamic_import(config['service_class'])
+            return service_class()
+
+        # Fallback to hardcoded factory
+        return super().create_service(agent_type)
 ```
 
 ## OpenRouter Integration
@@ -192,8 +522,7 @@ class OpenRouterErrorMapper:
 # config/application_config.py
 from pydantic_settings import BaseSettings
 from pydantic import Field
-from typing import Optional
-import os
+from typing import Optional, Dict, Any
 
 class ApplicationConfig(BaseSettings):
     """12-Factor App configuration using environment variables"""
@@ -219,29 +548,6 @@ class ApplicationConfig(BaseSettings):
 
     # Development Settings
     debug_mode: bool = Field(default=False, env="DEBUG_MODE")
-
-    # Agent Default Parameters
-    none_agent_defaults: Dict[str, Any] = Field(
-        default={"temperature": 0.1, "max_tokens": 800},
-        env="NONE_AGENT_DEFAULTS"
-    )
-    cot_agent_defaults: Dict[str, Any] = Field(
-        default={"temperature": 0.8, "max_tokens": 1000},
-        env="COT_AGENT_DEFAULTS"
-    )
-    tot_agent_defaults: Dict[str, Any] = Field(
-        default={
-            "temperature": 0.9,
-            "max_tokens": 1500,
-            "tree_depth": 3,
-            "branches_per_step": 4,
-            "evaluation_method": "vote",
-            "pruning_threshold": 0.3,
-            "backtrack_on_failure": True,
-            "max_evaluations": 20
-        },
-        env="TOT_AGENT_DEFAULTS"
-    )
 
     class Config:
         env_file = ".env"
@@ -275,11 +581,6 @@ DEBUG_MODE=false
 # Performance Tuning
 MAX_CONCURRENT_EVALUATIONS=1
 QUESTION_TIMEOUT=30
-
-# Agent Default Parameters (JSON format)
-NONE_AGENT_DEFAULTS={"temperature": 0.1, "max_tokens": 800}
-COT_AGENT_DEFAULTS={"temperature": 0.8, "max_tokens": 1000}
-TOT_AGENT_DEFAULTS={"temperature": 0.9, "max_tokens": 1500, "tree_depth": 3, "branches_per_step": 4, "evaluation_method": "vote", "pruning_threshold": 0.3, "backtrack_on_failure": true, "max_evaluations": 20}
 ```
 
 **.env.development**
@@ -414,6 +715,7 @@ from dependency_injector import containers, providers
 from config.application_config import ApplicationConfig, get_config
 from infrastructure.database import DatabaseManager
 from infrastructure.openrouter_client import OpenRouterClient, OpenRouterConfig
+from infrastructure.reasoning_service import ReasoningInfrastructureService
 from application.services import EvaluationOrchestrator, BenchmarkProcessor
 from domain.services import ReasoningAgentServiceFactory
 
@@ -442,10 +744,15 @@ class Container(containers.DeclarativeContainer):
         )
     )
 
+    reasoning_infrastructure_service = providers.Singleton(
+        ReasoningInfrastructureService,
+        openrouter_client=openrouter_client,
+        error_mapper=providers.Factory(OpenRouterErrorMapper)
+    )
+
     # Domain Services
     reasoning_service_factory = providers.Singleton(
-        ReasoningAgentServiceFactory,
-        openrouter_client=openrouter_client
+        ReasoningAgentServiceFactory
     )
 
     # Application Services
@@ -453,7 +760,8 @@ class Container(containers.DeclarativeContainer):
         EvaluationOrchestrator,
         config=config,
         database=database,
-        reasoning_service_factory=reasoning_service_factory
+        reasoning_service_factory=reasoning_service_factory,
+        reasoning_infrastructure_service=reasoning_infrastructure_service
     )
 
     benchmark_processor = providers.Factory(
@@ -549,39 +857,6 @@ class HealthChecker:
         return HealthStatus(status=overall_status, checks=checks)
 ```
 
-## Deployment Configuration
-
-### Docker Support (Future)
-
-```dockerfile
-# Dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-
-# Install uv
-RUN pip install uv
-
-# Copy dependency files
-COPY pyproject.toml uv.lock ./
-
-# Install dependencies
-RUN uv sync --frozen
-
-# Copy application code
-COPY . .
-
-# Set environment variables
-ENV PYTHONPATH=/app
-ENV PYTHONUNBUFFERED=1
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD python -c "import sys; from infrastructure.health import HealthChecker; sys.exit(0)"
-
-CMD ["python", "-m", "cli.main"]
-```
-
 ## Security Considerations
 
 ### API Key Management
@@ -618,6 +893,7 @@ class BenchmarkRepositoryImpl:
 ```
 
 **Design Rationale:**
+
 - **Simple for v2**: No database complexity for mapping table
 - **Easy to extend**: Add new benchmarks by updating the constant
 - **Clear error handling**: Fallback to name if not in registry
@@ -653,31 +929,10 @@ openrouter_privacy_config = {
 
 ---
 
-## Missing Infrastructure Components?
-
-Based on the application services architecture, this infrastructure covers:
-
-✅ **OpenRouter Integration** - Complete API client with error mapping
-✅ **Configuration Management** - 12-factor app with python-dotenv
-✅ **Database Infrastructure** - SQLite with migration support
-✅ **Development Environment** - uv venv setup
-✅ **Logging** - Structured logging with configurable output
-✅ **Dependency Injection** - Service container for clean architecture
-✅ **Health Monitoring** - API connectivity and database checks
-✅ **Security** - API key management and privacy controls
-
-**Potentially Missing:**
-
-- **Background Task Processing** - For async evaluation execution (consider adding Celery/RQ)
-- **File Storage** - For benchmark uploads and result exports (filesystem sufficient for v1)
-- **Metrics Collection** - For research analytics (can add later)
-- **API Rate Limiting** - Client-side throttling (OpenRouter handles this)
-
-The core infrastructure requirements are comprehensively covered for the initial implementation.
-
 ## See Also
 
 - **[Data Model](v2-data-model.md)** - Database schema requiring these infrastructure components
 - **[Application Services Architecture](v2-application-services-architecture.md)** - Service patterns using these infrastructure integrations
 - **[Project Structure](v2-project-structure.md)** - Infrastructure layer organization and dependency injection
 - **[CLI Design](v2-cli-design.md)** - CLI framework and user interface dependencies
+- **[Reasoning Domain Logic](v2-reasoning-domain-logic.md)** - Domain logic patterns integrated with infrastructure parsing strategies

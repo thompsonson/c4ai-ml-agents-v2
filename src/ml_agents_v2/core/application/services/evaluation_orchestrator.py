@@ -14,7 +14,8 @@ from ...domain.repositories.evaluation_repository import EvaluationRepository
 from ...domain.repositories.preprocessed_benchmark_repository import (
     PreprocessedBenchmarkRepository,
 )
-from ...domain.services.reasoning.reasoning_agent_factory import ReasoningAgentFactory
+# NOTE: ReasoningAgentFactory removed for Phase 6 retrofit
+# Will be replaced with infrastructure service
 from ...domain.value_objects.agent_config import AgentConfig
 from ...domain.value_objects.answer import Answer
 from ...domain.value_objects.evaluation_results import EvaluationResults
@@ -43,18 +44,18 @@ class EvaluationOrchestrator:
         self,
         evaluation_repository: EvaluationRepository,
         benchmark_repository: PreprocessedBenchmarkRepository,
-        reasoning_agent_factory: ReasoningAgentFactory,
+        # reasoning_agent_factory: ReasoningAgentFactory,  # Removed for Phase 6
     ) -> None:
         """Initialize the evaluation orchestrator.
 
         Args:
             evaluation_repository: Repository for evaluation persistence
             benchmark_repository: Repository for benchmark access
-            reasoning_agent_factory: Factory for creating reasoning agents
+            # reasoning_agent_factory: Factory for creating reasoning agents  # Removed for Phase 6
         """
         self._evaluation_repo = evaluation_repository
         self._benchmark_repo = benchmark_repository
-        self._reasoning_factory = reasoning_agent_factory
+        # self._reasoning_factory = reasoning_agent_factory  # Removed for Phase 6
         self._logger = logging.getLogger(__name__)
 
     def create_evaluation(
@@ -387,109 +388,16 @@ class EvaluationOrchestrator:
         Returns:
             Compiled evaluation results
         """
-        # Create reasoning agent
-        reasoning_agent = self._reasoning_factory.create_service(
-            evaluation.agent_config
-        )
+        # NOTE: Reasoning agent creation disabled for Phase 6 retrofit
+        # Will be replaced with infrastructure service integration
+        # reasoning_agent = self._reasoning_factory.create_service(
+        #     evaluation.agent_config
+        # )
 
-        questions = benchmark.get_questions()
-        answers: list[Answer] = []
-        errors: list[FailureReason] = []
-        start_time = datetime.now()
-
-        for i, question in enumerate(questions, 1):
-            question_start = datetime.now()
-
-            # Report progress
-            if progress_callback:
-                progress_info = ProgressInfo(
-                    evaluation_id=evaluation.evaluation_id,
-                    current_question=i,
-                    total_questions=len(questions),
-                    successful_answers=len(answers),
-                    failed_questions=len(errors),
-                    started_at=evaluation.started_at or start_time,
-                    last_updated=datetime.now(),
-                    current_question_text=(
-                        question.text[:100] + "..."
-                        if len(question.text) > 100
-                        else question.text
-                    ),
-                )
-                progress_callback(progress_info)
-
-            try:
-                # Process question with reasoning agent
-                answer = await reasoning_agent.answer_question(
-                    question, evaluation.agent_config
-                )
-                answers.append(answer)
-
-                self._logger.debug(
-                    "Question processed successfully",
-                    extra={
-                        "evaluation_id": str(evaluation.evaluation_id),
-                        "question_id": question.id,
-                        "execution_time": (
-                            datetime.now() - question_start
-                        ).total_seconds(),
-                    },
-                )
-
-            except Exception as e:
-                # Log error but continue execution
-                error_reason = FailureReason(
-                    category="unknown",
-                    description=f"Question {question.id} processing failed",
-                    technical_details=str(e),
-                    occurred_at=datetime.now(),
-                    recoverable=False,
-                )
-                errors.append(error_reason)
-
-                self._logger.warning(
-                    "Question processing failed",
-                    extra={
-                        "evaluation_id": str(evaluation.evaluation_id),
-                        "question_id": question.id,
-                        "error": str(e),
-                    },
-                )
-
-        # Compile results
-        total_time = (datetime.now() - start_time).total_seconds()
-
-        # Create detailed results for each question
-        from ...domain.value_objects.evaluation_results import QuestionResult
-
-        detailed_results = []
-        correct_answers = 0
-
-        for i, question in enumerate(questions):
-            if i < len(answers):
-                answer = answers[i]
-                is_correct = answer.extracted_answer == question.expected_answer
-                if is_correct:
-                    correct_answers += 1
-
-                detailed_result = QuestionResult(
-                    question_id=question.id,
-                    question_text=question.text,
-                    expected_answer=question.expected_answer,
-                    actual_answer=answer.extracted_answer,
-                    is_correct=is_correct,
-                )
-                detailed_results.append(detailed_result)
-
-        return EvaluationResults(
-            total_questions=len(questions),
-            correct_answers=correct_answers,
-            accuracy=(correct_answers / len(questions)) * 100 if questions else 0,
-            average_execution_time=total_time / len(questions) if questions else 0,
-            total_tokens=sum(answer.token_usage.total_tokens for answer in answers),
-            error_count=len(errors),
-            detailed_results=detailed_results,
-            summary_statistics={},  # Empty for now
+        # All evaluation execution logic temporarily disabled for Phase 6:
+        raise NotImplementedError(
+            "Reasoning agent execution disabled during Phase 6 retrofit. "
+            "Will be restored with infrastructure service integration."
         )
 
     def _validate_agent_config(self, agent_config: AgentConfig) -> ValidationResult:
@@ -503,13 +411,15 @@ class EvaluationOrchestrator:
         """
         errors = []
 
+        # NOTE: Agent type validation disabled for Phase 6 retrofit
+        # Will be replaced with infrastructure service validation
         # Check if agent type is supported
-        if not self._reasoning_factory.is_agent_type_supported(agent_config.agent_type):
-            available_types = self._reasoning_factory.get_supported_agent_types()
-            errors.append(
-                f"Unsupported agent type '{agent_config.agent_type}'. "
-                f"Available: {available_types}"
-            )
+        # if not self._reasoning_factory.is_agent_type_supported(agent_config.agent_type):
+        #     available_types = self._reasoning_factory.get_supported_agent_types()
+        #     errors.append(
+        #         f"Unsupported agent type '{agent_config.agent_type}'. "
+        #         f"Available: {available_types}"
+        #     )
 
         # Additional validation can be added here
         if agent_config.model_parameters.get("temperature", 1.0) < 0:

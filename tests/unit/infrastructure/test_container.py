@@ -41,7 +41,7 @@ class TestContainer:
         assert hasattr(container, "evaluation_repository")
 
         # Domain Layer - Service Factory
-        assert hasattr(container, "reasoning_agent_factory")
+        # assert hasattr(container, "reasoning_agent_factory")  # Removed for Phase 6
 
         # Infrastructure Services
         assert hasattr(container, "health_checker")
@@ -67,9 +67,10 @@ class TestContainer:
         assert isinstance(container.benchmark_repository, providers.Singleton)
         assert isinstance(container.evaluation_repository, providers.Singleton)
 
-    def test_reasoning_agent_factory_provider_type(self, container):
-        """Test that reasoning_agent_factory provider is properly configured."""
-        assert isinstance(container.reasoning_agent_factory, providers.Singleton)
+    # NOTE: test_reasoning_agent_factory_provider_type removed for Phase 6 retrofit
+    # def test_reasoning_agent_factory_provider_type(self, container):
+    #     """Test that reasoning_agent_factory provider is properly configured."""
+    #     assert isinstance(container.reasoning_agent_factory, providers.Singleton)
 
     def test_health_checker_provider_type(self, container):
         """Test that health_checker provider is properly configured."""
@@ -115,11 +116,12 @@ class TestContainer:
         assert provider is not None
         assert isinstance(provider, providers.Singleton)
 
-    def test_reasoning_agent_factory_provider_no_dependencies(self, container):
-        """Test that reasoning_agent_factory provider exists and is configured."""
-        provider = container.reasoning_agent_factory
-        assert provider is not None
-        assert isinstance(provider, providers.Singleton)
+    # NOTE: test_reasoning_agent_factory_provider_no_dependencies removed for Phase 6 retrofit
+    # def test_reasoning_agent_factory_provider_no_dependencies(self, container):
+    #     """Test that reasoning_agent_factory provider exists and is configured."""
+    #     provider = container.reasoning_agent_factory
+    #     assert provider is not None
+    #     assert isinstance(provider, providers.Singleton)
 
     def test_container_provides_all_services(self, container):
         """Test that container can provide all configured services."""
@@ -130,7 +132,7 @@ class TestContainer:
         assert container.openrouter_client is not None
         assert container.benchmark_repository is not None
         assert container.evaluation_repository is not None
-        assert container.reasoning_agent_factory is not None
+        # assert container.reasoning_agent_factory is not None  # Removed for Phase 6
         assert container.health_checker is not None
 
     def test_container_basic_configuration(self, container):
@@ -145,7 +147,7 @@ class TestContainer:
         assert hasattr(container, "openrouter_client")
         assert hasattr(container, "benchmark_repository")
         assert hasattr(container, "evaluation_repository")
-        assert hasattr(container, "reasoning_agent_factory")
+        # assert hasattr(container, "reasoning_agent_factory")  # Removed for Phase 6
         assert hasattr(container, "health_checker")
 
         # Verify provider types
@@ -155,5 +157,5 @@ class TestContainer:
         assert isinstance(container.openrouter_client, providers.Singleton)
         assert isinstance(container.benchmark_repository, providers.Singleton)
         assert isinstance(container.evaluation_repository, providers.Singleton)
-        assert isinstance(container.reasoning_agent_factory, providers.Singleton)
+        # assert isinstance(container.reasoning_agent_factory, providers.Singleton)  # Removed for Phase 6
         assert isinstance(container.health_checker, providers.Singleton)

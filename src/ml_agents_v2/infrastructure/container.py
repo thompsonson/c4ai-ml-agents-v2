@@ -12,9 +12,10 @@ from ml_agents_v2.core.application.services.evaluation_orchestrator import (
 from ml_agents_v2.core.application.services.results_analyzer import (
     ResultsAnalyzer,
 )
-from ml_agents_v2.core.domain.services.reasoning.reasoning_agent_factory import (
-    ReasoningAgentFactory,
-)
+# NOTE: ReasoningAgentFactory removed for Phase 6 retrofit
+# from ml_agents_v2.core.domain.services.reasoning.reasoning_agent_factory import (
+#     ReasoningAgentFactory,
+# )
 from ml_agents_v2.infrastructure.database.repositories.benchmark_repository_impl import (
     BenchmarkRepositoryImpl,
 )
@@ -70,10 +71,10 @@ class Container(containers.DeclarativeContainer):
         session_manager=database_session_manager,
     )
 
-    # Domain Layer - Service Factory
-    reasoning_agent_factory = providers.Singleton(
-        ReasoningAgentFactory,
-    )
+    # NOTE: Domain Layer - Service Factory removed for Phase 6 retrofit
+    # reasoning_agent_factory = providers.Singleton(
+    #     ReasoningAgentFactory,
+    # )
 
     # Infrastructure Services
     health_checker = providers.Singleton(
@@ -87,7 +88,7 @@ class Container(containers.DeclarativeContainer):
         EvaluationOrchestrator,
         evaluation_repository=evaluation_repository,
         benchmark_repository=benchmark_repository,
-        reasoning_agent_factory=reasoning_agent_factory,
+        # reasoning_agent_factory=reasoning_agent_factory,  # Removed for Phase 6
     )
 
     benchmark_processor = providers.Factory(

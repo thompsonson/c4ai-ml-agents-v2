@@ -100,30 +100,29 @@ pending → running → completed
 
 #### ReasoningAgentService
 
-**Purpose**: Stateless service that applies reasoning logic to questions
+**Purpose**: Defines business logic for specific reasoning approaches (None, Chain of Thought, etc.)
+
+The ReasoningAgentService contains pure domain logic for reasoning strategies including prompt engineering rules, response parsing patterns, and configuration validation. Implementation details are separated into infrastructure services that handle external API calls and structured output parsing.
+
+**Domain Responsibilities:**
+
+- Prompt strategy definition and template construction
+- Response processing and answer extraction business rules
+- Configuration validation against reasoning approach requirements
+- Reasoning trace construction following domain patterns
 
 **Interface**:
 
 ```python
 class ReasoningAgentService:
-    def process_question(self, question: Question, config: AgentConfig) -> Answer
+    def get_prompt_strategy(self) -> PromptStrategy
+    def process_question(self, question: Question, config: AgentConfig) -> str
+    def process_response(self, raw_response: str, context: Dict[str, Any]) -> ReasoningResult
+    def validate_config(self, config: AgentConfig) -> ValidationResult
     def get_agent_type(self) -> str
-    def validate_config(self, config: AgentConfig) -> bool
 ```
 
-**Initial Implementations** (focus on 2 core approaches):
-
-1. **None**: Direct prompting without reasoning steps
-2. **ChainOfThought**: Step-by-step reasoning process
-
-**Future Implementations** (pending paper references):
-
-3. **ProgramOfThought**: Code-based problem solving
-4. **ReasoningAsPlanning**: Strategic planning with goal decomposition
-5. **Reflection**: Self-evaluation and iterative improvement
-6. **ChainOfVerification**: Systematic verification with follow-up questions
-7. **SkeletonOfThought**: Hierarchical outline-first reasoning
-8. **TreeOfThought**: Multiple reasoning path exploration and synthesis
+**Implementation Patterns**: See [Reasoning Domain Logic](v2-reasoning-domain-logic.md) for complete domain boundaries, business rule implementations, and infrastructure integration patterns.
 
 ### Value Objects
 
@@ -181,7 +180,6 @@ This is a value object because configurations are reusable and shareable across 
 
 - `extracted_answer`: Clean, final answer
 - `reasoning_trace`: Step-by-step reasoning process
-- `confidence`: Agent confidence score (if available)
 - `execution_time`: Time taken to generate answer
 - `token_usage`: LLM token consumption metrics
 - `raw_response`: Full model response text
@@ -223,7 +221,7 @@ This is a value object because configurations are reusable and shareable across 
 
 - `approach_type`: Type of reasoning used ("None" or "ChainOfThought")
 - `reasoning_text`: The reasoning content (empty for "None", step-by-step text for "ChainOfThought")
-- `logprob_confidence`: Optional confidence score from model logprobs (when supported)
+- `metadata`: Additional trace information
 
 **Immutable**: Yes
 
@@ -231,7 +229,6 @@ This is a value object because configurations are reusable and shareable across 
 
 - For "None" approach: `reasoning_text` is empty string
 - For "ChainOfThought" approach: `reasoning_text` contains the model's reasoning steps
-- `logprob_confidence` uses libraries like structured-logprobs when model supports token-level confidence
 
 ---
 
@@ -438,6 +435,7 @@ Domain model classes should be organized by aggregate:
 - **[Application Services Architecture](v2-application-services-architecture.md)** - Service coordination patterns using these domain concepts
 - **[Ubiquitous Language](v2-ubiquitous-language.md)** - Shared vocabulary definitions for domain terms
 - **[Core Behaviors](v2-core-behaviour-definition.md)** - User workflows that manipulate these domain entities
+- **[Reasoning Domain Logic](v2-reasoning-domain-logic.md)** - Detailed reasoning agent business logic and implementation patterns
 
 ---
 

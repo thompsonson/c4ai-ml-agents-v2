@@ -142,7 +142,15 @@ Pure business logic with no external dependencies.
 **services/**: Stateless domain operations including reasoning agent implementations
 **repositories/**: Interfaces for data persistence
 
-**reasoning/**: Concrete reasoning agent implementations (NoneAgent, ChainOfThoughtAgent) containing pure reasoning logic
+**reasoning/**: Concrete reasoning agent implementations containing pure domain business logic:
+
+- Prompt engineering strategies and template construction (domain logic)
+- Response parsing and answer extraction business rules (domain logic)
+- Reasoning trace construction and validation patterns (domain logic)
+- Agent-specific configuration validation rules (domain logic)
+- NO external API calls or infrastructure concerns
+
+See [Reasoning Domain Logic](v2-reasoning-domain-logic.md) for complete implementation patterns and domain boundaries.
 
 ### `core/application/`
 
@@ -264,6 +272,7 @@ ml-agents = "ml_agents_v2.cli.main:cli"
 ## See Also
 
 - **[Domain Model](v2-domain-model.md)** - Business entities organized in the domain layer
+- **[Reasoning Domain Logic](v2-reasoning-domain-logic.md)** - Reasoning agent implementation patterns and domain boundaries
 - **[Infrastructure Requirements](v2-infrastructure-requirements.md)** - Technology dependencies and setup requirements
 - **[Application Services Architecture](v2-application-services-architecture.md)** - Service layer coordination patterns
 - **[CLI Design](v2-cli-design.md)** - CLI implementation structure and organization

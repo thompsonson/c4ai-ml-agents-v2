@@ -86,6 +86,7 @@ def test_reasoning_agent_factory():
 **Focus**: Service coordination and external system integration
 
 **Implemented Test Structure**:
+
 ```
 tests/unit/application/
 ├── conftest.py              # Application layer fixtures and mocks
@@ -178,6 +179,7 @@ async def test_openrouter_error_mapping():
 **Focus**: Complete user workflows and CLI interface
 
 **Implemented Test Structure**:
+
 ```
 tests/acceptance/
 ├── test_cli_basic.py           # Basic CLI functionality and help
@@ -389,12 +391,14 @@ class EvaluationFactory:
 ### Current Testing Status
 
 **Test Results**: 427 tests passing with full quality gate compliance:
+
 - ✅ **pytest**: All tests passing
 - ✅ **mypy**: Type checking clean
 - ✅ **black**: Code formatting compliant
 - ✅ **ruff**: Linting passed
 
 **Implementation Notes**:
+
 - **Pragmatic Approach**: Focused on high-value scenarios for application services rather than exhaustive coverage
 - **Async Testing**: Proper AsyncMock usage for evaluation execution workflows
 - **Integration Patterns**: Service coordination testing with mocked external dependencies
@@ -404,7 +408,7 @@ class EvaluationFactory:
 
 - **[Core Behaviors](v2-core-behaviour-definition.md)** - User workflows requiring test validation
 - **[Application Services Architecture](v2-application-services-architecture.md)** - Service coordination patterns to test
-- **[Agents](v2-agents.md)** - Reasoning agent testing requirements
+- **[Reasoning Domain Logic](v2-reasoning-domain-logic.md)** - Domain logic patterns requiring validation
 - **[Project Structure](v2-project-structure.md)** - Test organization framework
 - **[CLI Design](v2-cli-design.md)** - Command interface testing requirements
 
