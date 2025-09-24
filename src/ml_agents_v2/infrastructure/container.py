@@ -1,6 +1,7 @@
 """Dependency injection container for ML Agents v2."""
 
 from dependency_injector import containers, providers
+from openai import AsyncOpenAI
 
 from ml_agents_v2.config.application_config import get_config
 from ml_agents_v2.core.application.services.benchmark_processor import (
@@ -12,10 +13,9 @@ from ml_agents_v2.core.application.services.evaluation_orchestrator import (
 from ml_agents_v2.core.application.services.results_analyzer import (
     ResultsAnalyzer,
 )
-# NOTE: ReasoningAgentFactory removed for Phase 6 retrofit
-# from ml_agents_v2.core.domain.services.reasoning.reasoning_agent_factory import (
-#     ReasoningAgentFactory,
-# )
+from ml_agents_v2.core.domain.services.reasoning.reasoning_agent_factory import (
+    ReasoningAgentServiceFactory,
+)
 from ml_agents_v2.infrastructure.database.repositories.benchmark_repository_impl import (
     BenchmarkRepositoryImpl,
 )
@@ -26,6 +26,8 @@ from ml_agents_v2.infrastructure.database.session_manager import DatabaseSession
 from ml_agents_v2.infrastructure.health import HealthChecker
 from ml_agents_v2.infrastructure.logging_config import configure_logging
 from ml_agents_v2.infrastructure.openrouter.client import OpenRouterClient
+from ml_agents_v2.infrastructure.openrouter.error_mapper import OpenRouterErrorMapper
+from ml_agents_v2.infrastructure.reasoning_service import ReasoningInfrastructureService
 
 
 class Container(containers.DeclarativeContainer):
@@ -60,6 +62,14 @@ class Container(containers.DeclarativeContainer):
         max_retries=config.provided.openrouter_max_retries,
     )
 
+    # Async OpenAI client for Phase 6 structured output parsing
+    async_openrouter_client = providers.Singleton(
+        AsyncOpenAI,
+        api_key=config.provided.openrouter_api_key,
+        base_url=config.provided.openrouter_base_url,
+        timeout=config.provided.openrouter_timeout,
+    )
+
     # Infrastructure Layer - Repository Implementations
     benchmark_repository = providers.Singleton(
         BenchmarkRepositoryImpl,
@@ -71,12 +81,28 @@ class Container(containers.DeclarativeContainer):
         session_manager=database_session_manager,
     )
 
-    # NOTE: Domain Layer - Service Factory removed for Phase 6 retrofit
-    # reasoning_agent_factory = providers.Singleton(
-    #     ReasoningAgentFactory,
-    # )
+    # Domain Layer - Service Factory for Phase 6
+    reasoning_agent_service_factory = providers.Singleton(
+        ReasoningAgentServiceFactory,
+    )
+
+    # Domain service registry created via factory
+    domain_service_registry = providers.Singleton(
+        lambda factory: factory.create_registry(),
+        factory=reasoning_agent_service_factory,
+    )
 
     # Infrastructure Services
+    openrouter_error_mapper = providers.Singleton(
+        OpenRouterErrorMapper,
+    )
+
+    reasoning_infrastructure_service = providers.Singleton(
+        ReasoningInfrastructureService,
+        openrouter_client=async_openrouter_client,
+        error_mapper=openrouter_error_mapper,
+    )
+
     health_checker = providers.Singleton(
         HealthChecker,
         database_session_manager=database_session_manager,
@@ -88,7 +114,8 @@ class Container(containers.DeclarativeContainer):
         EvaluationOrchestrator,
         evaluation_repository=evaluation_repository,
         benchmark_repository=benchmark_repository,
-        # reasoning_agent_factory=reasoning_agent_factory,  # Removed for Phase 6
+        reasoning_infrastructure_service=reasoning_infrastructure_service,
+        domain_service_registry=domain_service_registry,
     )
 
     benchmark_processor = providers.Factory(

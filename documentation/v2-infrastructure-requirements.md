@@ -55,8 +55,8 @@ dev = [
 
 The infrastructure layer uses two parsing strategies depending on model capabilities:
 
-- **Structured LogProbs**: For models supporting logprobs (OpenAI models) - provides confidence scoring
-- **Instructor**: Fallback for models without logprobs support (Anthropic, etc.) - reliable parsing without confidence
+- **Structured LogProbs**: For models supporting logprobs (OpenAI models)
+- **Instructor**: For models without logprobs support (Anthropic, etc.) 
 
 ### Model Capability Detection
 

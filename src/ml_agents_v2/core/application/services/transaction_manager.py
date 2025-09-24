@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 from ...domain.repositories.evaluation_repository import EvaluationRepository
 from ...domain.repositories.preprocessed_benchmark_repository import (

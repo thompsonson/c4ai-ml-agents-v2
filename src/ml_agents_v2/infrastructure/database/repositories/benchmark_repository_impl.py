@@ -1,7 +1,7 @@
 """SQLAlchemy implementation of PreprocessedBenchmarkRepository."""
 
 import uuid
-from typing import Any, Union
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -214,7 +214,7 @@ class BenchmarkRepositoryImpl(PreprocessedBenchmarkRepository):
         except SQLAlchemyError as e:
             raise RepositoryError(f"Failed to check benchmark existence: {e}") from e
 
-    def list_all(self, limit: Union[int, None] = None) -> list[PreprocessedBenchmark]:
+    def list_all(self, limit: int | None = None) -> list[PreprocessedBenchmark]:
         """List all benchmarks.
 
         Returns:

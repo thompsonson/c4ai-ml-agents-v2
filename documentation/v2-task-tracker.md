@@ -61,38 +61,38 @@
 
 **Testing Status**: 427 tests passing with pragmatic approach focusing on critical business workflows, error scenarios, and integration points rather than exhaustive coverage.
 
-## Phase 6: Reasoning Domain Logic Retrofit ⚠️ **IN PROGRESS**
+## Phase 6: Reasoning Domain Logic Retrofit ✅ **COMPLETED**
 
 **Purpose**: Retrofit existing codebase with proper domain/infrastructure boundaries and simplified structured output parsing
 
 ### Domain Layer Updates
 
-- [ ] Refactor ReasoningAgentService implementations to use PromptStrategy value objects
-- [ ] Implement ReasoningResult domain value object with business logic methods
-- [ ] Update NoneAgentService and ChainOfThoughtAgentService with domain-only logic
-- [ ] Remove infrastructure concerns from existing reasoning agent implementations
+- [x] Refactor ReasoningAgentService implementations to use PromptStrategy value objects
+- [x] Implement ReasoningResult domain value object with business logic methods
+- [x] Update NoneAgentService and ChainOfThoughtAgentService with domain-only logic
+- [x] Remove infrastructure concerns from existing reasoning agent implementations
 
 ### Infrastructure Layer Updates
 
-- [ ] Add structured output parsing dependencies (instructor, structured-logprobs)
-- [ ] Implement OutputParserFactory with model capability detection (StructuredLogprobs OR Instructor, not fallback)
-- [ ] Create infrastructure Pydantic output models (DirectAnswerOutput, ChainOfThoughtOutput)
-- [ ] Build ReasoningInfrastructureService for real API integration (no mock mode)
-- [ ] Add model capabilities registry with logprobs support detection
+- [x] Add structured output parsing dependencies (instructor, structured-logprobs)
+- [x] Implement OutputParserFactory with model capability detection (StructuredLogprobs OR Instructor, not fallback)
+- [x] Create infrastructure Pydantic output models (DirectAnswerOutput, ChainOfThoughtOutput)
+- [x] Build ReasoningInfrastructureService for real API integration (no mock mode)
+- [x] Add model capabilities registry with logprobs support detection
 
 ### Application Layer Updates
 
-- [ ] Update EvaluationOrchestrator to use ReasoningInfrastructureService
-- [ ] Modify service coordination to separate domain from infrastructure calls
-- [ ] Update partial failure handling (log failures, continue evaluation, include in results)
+- [x] Update EvaluationOrchestrator to use ReasoningInfrastructureService
+- [x] Modify service coordination to separate domain from infrastructure calls
+- [x] Update partial failure handling (log failures, continue evaluation, include in results)
 
 ### Testing Updates
 
-- [ ] Update domain layer tests to focus on business logic only
-- [ ] Add infrastructure layer tests using mocked external services
-- [ ] Create integration tests for domain-infrastructure boundary
-- [ ] Update mocking strategy to separate domain from infrastructure concerns
-- [ ] **BLOCKER CHECK**: Verify pragmatic testing possible without real API calls
+- [x] Update domain layer tests to focus on business logic only
+- [x] Add infrastructure layer tests using mocked external services
+- [x] Create integration tests for domain-infrastructure boundary
+- [x] Update mocking strategy to separate domain from infrastructure concerns
+- [x] **BLOCKER CHECK**: Verify pragmatic testing possible without real API calls
 
 **Constraints Applied**:
 

@@ -1,65 +1,67 @@
-"""ReasoningAgentService interface for question-answering."""
+"""ReasoningAgentService interface for domain reasoning logic."""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 from ...value_objects.agent_config import AgentConfig
-from ...value_objects.answer import Answer
+from ...value_objects.prompt_strategy import PromptStrategy
 from ...value_objects.question import Question
+from ...value_objects.reasoning_result import ReasoningResult
+from ...value_objects.validation_result import ValidationResult
 
 
 class ReasoningAgentService(ABC):
-    """Abstract interface for reasoning agents that answer questions.
+    """Domain service implementing specific reasoning approach.
 
-    Reasoning agents process questions using different approaches (none, chain of thought)
-    and return structured answers with reasoning traces, confidence scores, and metrics.
+    Contains pure business logic for reasoning strategies including prompt
+    engineering rules, response parsing patterns, and configuration validation.
+    Infrastructure concerns (API calls, network handling) are handled
+    separately.
     """
 
     @abstractmethod
-    async def answer_question(
-        self, question: Question, agent_config: AgentConfig
-    ) -> Answer:
-        """Answer a question using the configured reasoning approach.
+    def get_prompt_strategy(self) -> PromptStrategy:
+        """Return prompt engineering strategy for this approach."""
+
+    @abstractmethod
+    def process_question(self, question: Question, config: AgentConfig) -> str:
+        """Generate prompt using domain strategy.
 
         Args:
-            question: Question to answer
-            agent_config: Configuration for the reasoning agent
+            question: Question to process
+            config: Agent configuration
 
         Returns:
-            Answer with reasoning trace and confidence if available
-
-        Raises:
-            ReasoningAgentError: If question answering fails
-            InvalidConfigurationError: If agent config is invalid for this service
+            Formatted prompt string
         """
 
     @abstractmethod
-    def supports_agent_type(self, agent_type: str) -> bool:
-        """Check if this service supports the given agent type.
+    def process_response(
+        self, raw_response: str, context: dict[str, Any]
+    ) -> ReasoningResult:
+        """Apply domain parsing rules to extract structured result.
 
         Args:
-            agent_type: Agent type to check (e.g., "none", "chain_of_thought")
+            raw_response: Raw response from LLM
+            context: Execution context and metadata
 
         Returns:
-            True if agent type is supported, False otherwise
+            ReasoningResult with parsed answer and reasoning
         """
 
     @abstractmethod
-    def get_supported_model_providers(self) -> list[str]:
-        """Get list of supported model providers.
+    def validate_config(self, config: AgentConfig) -> ValidationResult:
+        """Validate configuration against domain requirements.
+
+        Args:
+            config: Agent configuration to validate
 
         Returns:
-            List of supported provider names (e.g., ["openai", "anthropic"])
+            ValidationResult with any errors or warnings
         """
 
     @abstractmethod
-    def validate_config(self, agent_config: AgentConfig) -> bool:
-        """Validate that the agent configuration is compatible with this service.
-
-        Args:
-            agent_config: Configuration to validate
-
-        Returns:
-            True if configuration is valid, False otherwise
-        """
+    def get_agent_type(self) -> str:
+        """Return unique identifier for this reasoning approach."""

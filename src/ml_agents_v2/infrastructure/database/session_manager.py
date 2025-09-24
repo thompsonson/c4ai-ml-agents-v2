@@ -2,7 +2,6 @@
 
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Union
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -73,7 +72,7 @@ class DatabaseSessionManager:
 
 
 # Global session manager instance (will be initialized by dependency injection)
-_session_manager: Union[DatabaseSessionManager, None] = None
+_session_manager: DatabaseSessionManager | None = None
 
 
 def get_session_manager() -> DatabaseSessionManager:

@@ -3,7 +3,6 @@
 import json
 import uuid
 from datetime import datetime
-from typing import Union
 
 from sqlalchemy import DateTime, String, Text
 from sqlalchemy.dialects.postgresql import UUID
@@ -43,14 +42,14 @@ class EvaluationModel(Base):
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    started_at: Mapped[Union[datetime, None]] = mapped_column(DateTime, nullable=True)
-    completed_at: Mapped[Union[datetime, None]] = mapped_column(DateTime, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Results as JSON (nullable for pending/running evaluations)
-    results_json: Mapped[Union[str, None]] = mapped_column(Text, nullable=True)
+    results_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Failure reason as JSON (nullable for successful evaluations)
-    failure_reason_json: Mapped[Union[str, None]] = mapped_column(Text, nullable=True)
+    failure_reason_json: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     @classmethod
     def from_domain(cls, evaluation: Evaluation) -> "EvaluationModel":

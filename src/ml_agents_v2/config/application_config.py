@@ -1,6 +1,6 @@
 """Application configuration using 12-factor app principles."""
 
-from typing import Any, Union
+from typing import Any
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -42,7 +42,7 @@ class ApplicationConfig(BaseSettings):
         default="ML-Agents-v2",
         description="Application name for OpenRouter attribution",
     )
-    app_url: Union[str, None] = Field(
+    app_url: str | None = Field(
         default=None, description="Application URL for OpenRouter attribution"
     )
     log_level: str = Field(

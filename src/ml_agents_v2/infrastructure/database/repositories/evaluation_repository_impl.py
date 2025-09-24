@@ -1,7 +1,6 @@
 """SQLAlchemy implementation of EvaluationRepository."""
 
 import uuid
-from typing import Union
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -223,7 +222,7 @@ class EvaluationRepositoryImpl(EvaluationRepository):
                 f"Failed to list evaluations by benchmark: {e}"
             ) from e
 
-    def list_all(self, limit: Union[int, None] = None) -> list[Evaluation]:
+    def list_all(self, limit: int | None = None) -> list[Evaluation]:
         """List all evaluations.
 
         Returns:

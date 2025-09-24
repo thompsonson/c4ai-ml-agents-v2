@@ -1,7 +1,7 @@
 """Synchronous OpenRouter API client implementation."""
 
 import json
-from typing import Any, Union
+from typing import Any
 
 import httpx
 
@@ -52,11 +52,11 @@ class OpenRouterClient:
         model: str,
         messages: list[dict[str, str]],
         temperature: float = 0.7,
-        max_tokens: Union[int, None] = None,
+        max_tokens: int | None = None,
         top_p: float = 1.0,
         frequency_penalty: float = 0.0,
         presence_penalty: float = 0.0,
-        stop: Union[str, list[str], None] = None,
+        stop: str | list[str] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Execute chat completion request to OpenRouter.
@@ -103,9 +103,9 @@ class OpenRouterClient:
         payload.update(kwargs)
 
         # Make the request with retries
-        last_exception: Union[
-            httpx.HTTPStatusError, httpx.TimeoutException, httpx.RequestError, None
-        ] = None
+        last_exception: (
+            httpx.HTTPStatusError | httpx.TimeoutException | httpx.RequestError | None
+        ) = None
 
         for attempt in range(self.max_retries + 1):
             try:

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Callable
 from datetime import datetime
-from typing import Callable
 
 from ..dto.progress_info import ProgressInfo
 

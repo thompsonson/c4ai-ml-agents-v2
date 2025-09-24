@@ -7,7 +7,7 @@ name = "ml-agents-v2"
 version = "0.1.0"
 description = "ML Agents v2 - Reasoning research platform"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "C4AI Research Team"}
@@ -17,24 +17,25 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
 dependencies = [
-    "python-dotenv>=1.0.0",      # Environment variable management
-    "openai>=1.51.0",            # OpenRouter compatible async client
-    "httpx>=0.25.0",             # Async HTTP client for direct API calls
-    "pydantic>=2.5.0",           # Configuration validation
-    "pydantic-settings>=2.0.0",  # Settings management
-    "sqlalchemy>=2.0.0",         # Database ORM
-    "alembic>=1.13.0",           # Database migrations
-    "structlog>=23.2.0",         # Structured logging
-    "click>=8.1.0",              # CLI framework
-    "rich>=13.7.0",              # CLI formatting and progress bars
+    "python-dotenv>=1.0.0", # Environment variable management
+    "openai>=1.51.0", # OpenRouter compatible async client
+    "httpx>=0.25.0", # Async HTTP client for direct API calls
+    "pydantic>=2.5.0", # Configuration validation
+    "pydantic-settings>=2.0.0", # Settings management
+    "sqlalchemy>=2.0.0", # Database ORM
+    "alembic>=1.13.0", # Database migrations
+    "structlog>=23.2.0", # Structured logging
+    "click>=8.1.0", # CLI framework
+    "rich>=13.7.0", # CLI formatting and progress bars
     "dependency-injector>=4.41.0", # Dependency injection
+    "instructor>=1.11.3",
+    "structured-logprobs",
 ]
 
 [project.optional-dependencies]
@@ -56,10 +57,10 @@ packages = ["src/ml_agents_v2"]
 
 [tool.black]
 line-length = 88
-target-version = ['py39']
+target-version = ['py310']
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 line-length = 88
 
 [tool.ruff.lint]
@@ -77,7 +78,7 @@ ignore = [
 ]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
@@ -98,3 +99,6 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
 asyncio_mode = "auto"
+
+[tool.uv.sources]
+structured-logprobs = { git = "https://github.com/thompsonson/structured-logprobs.git" }

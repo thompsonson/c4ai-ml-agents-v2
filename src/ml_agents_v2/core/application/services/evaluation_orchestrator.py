@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime
-from typing import Callable
+
+# Type import to avoid circular dependencies
+from typing import TYPE_CHECKING
 
 from ...domain.entities.evaluation import Evaluation
 from ...domain.entities.preprocessed_benchmark import PreprocessedBenchmark
@@ -14,9 +17,11 @@ from ...domain.repositories.evaluation_repository import EvaluationRepository
 from ...domain.repositories.preprocessed_benchmark_repository import (
     PreprocessedBenchmarkRepository,
 )
-# NOTE: ReasoningAgentFactory removed for Phase 6 retrofit
-# Will be replaced with infrastructure service
+from ...domain.services.reasoning.reasoning_agent_service import ReasoningAgentService
 from ...domain.value_objects.agent_config import AgentConfig
+
+if TYPE_CHECKING:
+    from ....infrastructure.reasoning_service import ReasoningInfrastructureService
 from ...domain.value_objects.answer import Answer
 from ...domain.value_objects.evaluation_results import EvaluationResults
 from ...domain.value_objects.failure_reason import FailureReason
@@ -44,18 +49,21 @@ class EvaluationOrchestrator:
         self,
         evaluation_repository: EvaluationRepository,
         benchmark_repository: PreprocessedBenchmarkRepository,
-        # reasoning_agent_factory: ReasoningAgentFactory,  # Removed for Phase 6
+        reasoning_infrastructure_service: ReasoningInfrastructureService,
+        domain_service_registry: dict[str, ReasoningAgentService],
     ) -> None:
         """Initialize the evaluation orchestrator.
 
         Args:
             evaluation_repository: Repository for evaluation persistence
             benchmark_repository: Repository for benchmark access
-            # reasoning_agent_factory: Factory for creating reasoning agents  # Removed for Phase 6
+            reasoning_infrastructure_service: Infrastructure service for LLM calls
+            domain_service_registry: Registry of domain reasoning services
         """
         self._evaluation_repo = evaluation_repository
         self._benchmark_repo = benchmark_repository
-        # self._reasoning_factory = reasoning_agent_factory  # Removed for Phase 6
+        self._reasoning_infrastructure = reasoning_infrastructure_service
+        self._domain_services = domain_service_registry
         self._logger = logging.getLogger(__name__)
 
     def create_evaluation(
@@ -388,16 +396,127 @@ class EvaluationOrchestrator:
         Returns:
             Compiled evaluation results
         """
-        # NOTE: Reasoning agent creation disabled for Phase 6 retrofit
-        # Will be replaced with infrastructure service integration
-        # reasoning_agent = self._reasoning_factory.create_service(
-        #     evaluation.agent_config
-        # )
+        # Get domain service for the agent type
+        domain_service = self._domain_services[evaluation.agent_config.agent_type]
 
-        # All evaluation execution logic temporarily disabled for Phase 6:
-        raise NotImplementedError(
-            "Reasoning agent execution disabled during Phase 6 retrofit. "
-            "Will be restored with infrastructure service integration."
+        questions = benchmark.get_questions()
+        total_questions = len(questions)
+        results = []
+        correct_count = 0
+        error_count = 0
+        total_execution_time = 0.0
+        total_tokens = 0
+
+        for i, question in enumerate(questions):
+            try:
+                # Execute reasoning using infrastructure service
+                result = await self._reasoning_infrastructure.execute_reasoning(
+                    domain_service, question, evaluation.agent_config
+                )
+
+                if isinstance(result, Answer):
+                    # Check if answer is correct
+                    is_correct = (
+                        result.extracted_answer.strip().lower()
+                        == question.expected_answer.strip().lower()
+                    )
+                    if is_correct:
+                        correct_count += 1
+
+                    # Accumulate metrics
+                    total_execution_time += result.execution_time
+                    if result.token_usage:
+                        total_tokens += result.token_usage.total_tokens
+
+                    results.append(
+                        {
+                            "question_id": question.id,
+                            "extracted_answer": result.extracted_answer,
+                            "is_correct": is_correct,
+                            "execution_time": result.execution_time,
+                            "reasoning_trace": result.reasoning_trace,
+                        }
+                    )
+
+                else:  # FailureReason
+                    error_count += 1
+                    results.append(
+                        {
+                            "question_id": question.id,
+                            "error": str(result.description),
+                            "is_correct": False,
+                            "execution_time": 0.0,
+                        }
+                    )
+
+                # Update progress
+                if progress_callback:
+                    from datetime import datetime
+
+                    now = datetime.now()
+                    progress = ProgressInfo(
+                        evaluation_id=evaluation.evaluation_id,
+                        current_question=i + 1,
+                        total_questions=total_questions,
+                        successful_answers=correct_count,
+                        failed_questions=error_count,
+                        started_at=evaluation.started_at or now,
+                        last_updated=now,
+                    )
+                    progress_callback(progress)
+
+            except Exception as e:
+                error_count += 1
+                self._logger.error(
+                    "Question execution failed",
+                    extra={"question_id": question.id, "error": str(e)},
+                )
+
+        # Calculate final metrics
+        accuracy = correct_count / total_questions if total_questions > 0 else 0.0
+        avg_execution_time = (
+            total_execution_time / total_questions if total_questions > 0 else 0.0
+        )
+
+        # Convert dict results to QuestionResult objects
+        from ...domain.value_objects.evaluation_results import QuestionResult
+
+        question_results = []
+        for result_dict in results:
+            if "error" not in result_dict:
+                # Find the corresponding question for additional details
+                question = next(
+                    q for q in questions if q.id == result_dict["question_id"]
+                )
+                question_results.append(
+                    QuestionResult(
+                        question_id=str(result_dict["question_id"]),
+                        question_text=question.text,
+                        expected_answer=question.expected_answer,
+                        actual_answer=str(result_dict["extracted_answer"]),
+                        is_correct=bool(result_dict["is_correct"]),
+                    )
+                )
+
+        # Create summary statistics
+        summary_stats = {
+            "total_runtime_minutes": total_execution_time / 60,
+            "average_tokens_per_question": (
+                total_tokens / total_questions if total_questions > 0 else 0
+            ),
+            "success_rate": accuracy,
+            "error_rate": error_count / total_questions if total_questions > 0 else 0,
+        }
+
+        return EvaluationResults(
+            total_questions=total_questions,
+            correct_answers=correct_count,
+            accuracy=accuracy,
+            average_execution_time=avg_execution_time,
+            total_tokens=total_tokens,
+            error_count=error_count,
+            detailed_results=question_results,
+            summary_statistics=summary_stats,
         )
 
     def _validate_agent_config(self, agent_config: AgentConfig) -> ValidationResult:
@@ -411,17 +530,21 @@ class EvaluationOrchestrator:
         """
         errors = []
 
-        # NOTE: Agent type validation disabled for Phase 6 retrofit
-        # Will be replaced with infrastructure service validation
         # Check if agent type is supported
-        # if not self._reasoning_factory.is_agent_type_supported(agent_config.agent_type):
-        #     available_types = self._reasoning_factory.get_supported_agent_types()
-        #     errors.append(
-        #         f"Unsupported agent type '{agent_config.agent_type}'. "
-        #         f"Available: {available_types}"
-        #     )
+        if agent_config.agent_type not in self._domain_services:
+            available_types = list(self._domain_services.keys())
+            errors.append(
+                f"Unsupported agent type '{agent_config.agent_type}'. "
+                f"Available: {available_types}"
+            )
+        else:
+            # Use domain service for validation
+            domain_service = self._domain_services[agent_config.agent_type]
+            domain_validation = domain_service.validate_config(agent_config)
+            if not domain_validation.is_valid:
+                errors.extend(domain_validation.errors)
 
-        # Additional validation can be added here
+        # Additional validation
         if agent_config.model_parameters.get("temperature", 1.0) < 0:
             errors.append("Temperature must be non-negative")
 
