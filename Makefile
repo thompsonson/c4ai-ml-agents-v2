@@ -25,7 +25,16 @@ dev-install:
 	uv pip install -e ".[dev]"
 
 # Quality Gates (Non-Negotiable)
-quality-gates: test type-check format-check lint
+quality-gates:
+	@echo "Running quality gates..."
+	@printf "🧪 Tests: "; \
+	if uv run pytest -q >/dev/null 2>&1; then echo "OK"; else echo "FAILED"; uv run pytest -q; exit 1; fi
+	@printf "🔍 Type check: "; \
+	if uv run mypy src/ml_agents_v2 --no-error-summary >/dev/null 2>&1; then echo "OK"; else echo "FAILED"; uv run mypy src/ml_agents_v2; exit 1; fi
+	@printf "📐 Format check: "; \
+	if uv run black --check --quiet src/ tests/ >/dev/null 2>&1; then echo "OK"; else echo "FAILED"; uv run black --check --diff src/ tests/; exit 1; fi
+	@printf "🔧 Lint: "; \
+	if uv run ruff check --quiet src/ tests/ >/dev/null 2>&1; then echo "OK"; else echo "FAILED"; uv run ruff check src/ tests/; exit 1; fi
 	@echo "✅ All quality gates passed!"
 
 test:
