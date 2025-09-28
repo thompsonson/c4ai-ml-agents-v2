@@ -1,5 +1,6 @@
 """Evaluate command implementation."""
 
+import asyncio
 import uuid
 from datetime import datetime
 
@@ -101,11 +102,11 @@ def create(
         )
 
         # Display success message
-        short_id = str(evaluation.evaluation_id)[:8]
+        short_id = str(evaluation)[:8]
         agent_display = "Chain of Thought" if agent == "cot" else "Direct prompting"
 
         console.print(
-            f"✓ Created evaluation {short_id} ({evaluation.status})", style="green"
+            f"✓ Created evaluation {short_id} (pending)", style="green"
         )
         console.print(f"  Agent: {agent_display}")
         console.print(f"  Model: {model}")
@@ -144,13 +145,30 @@ def run(ctx: click.Context, evaluation_id: str) -> None:
             eval_uuid = uuid.UUID(evaluation_id)
         except ValueError:
             # Try to find by short ID (first 8 characters)
-            eval_uuid = uuid.UUID(evaluation_id.ljust(32, "0"))
+            # Get all evaluations and find one that starts with the provided ID
+            all_evaluations = orchestrator.list_evaluations()
+            matching_evaluations = [
+                eval_info for eval_info in all_evaluations
+                if str(eval_info.evaluation_id).startswith(evaluation_id)
+            ]
+
+            if len(matching_evaluations) == 0:
+                console.print(f"✗ Error: No evaluation found with ID starting with '{evaluation_id}'", style="red")
+                ctx.exit(1)
+            elif len(matching_evaluations) > 1:
+                console.print(f"✗ Error: Multiple evaluations found with ID starting with '{evaluation_id}'. Please use a longer ID.", style="red")
+                console.print("Matching evaluations:")
+                for eval_info in matching_evaluations:
+                    console.print(f"  {str(eval_info.evaluation_id)[:8]} - {eval_info.status}")
+                ctx.exit(1)
+            else:
+                eval_uuid = matching_evaluations[0].evaluation_id
 
         short_id = str(eval_uuid)[:8]
 
         console.print(f"Running evaluation {short_id}...")
 
-        # Execute evaluation with progress tracking
+        # Execute evaluation with real progress tracking
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -162,15 +180,18 @@ def run(ctx: click.Context, evaluation_id: str) -> None:
 
             task = progress.add_task("Executing evaluation...", total=100)
 
-            # Start the evaluation
-            orchestrator.execute_evaluation(evaluation_id=eval_uuid)
+            # Real progress callback
+            def progress_callback(progress_info):
+                if progress_info.total_questions > 0:
+                    completed_percentage = (progress_info.current_question / progress_info.total_questions) * 100
+                    progress.update(task, completed=completed_percentage)
+                    progress.update(task, description=f"Processing question {progress_info.current_question}/{progress_info.total_questions}")
 
-            # Simulate progress tracking (in real implementation, this would poll the progress tracker)
-            import time
-
-            for i in range(101):
-                progress.update(task, completed=i)
-                time.sleep(0.01)  # Small delay for demo
+            # Execute the evaluation with real async call
+            asyncio.run(orchestrator.execute_evaluation(
+                evaluation_id=eval_uuid,
+                progress_callback=progress_callback
+            ))
 
         console.print("✓ Completed evaluation", style="green")
 
@@ -199,7 +220,7 @@ def list_evaluations(ctx: click.Context, status: str, benchmark: str) -> None:
 
         # Get evaluations with filters
         evaluations = orchestrator.list_evaluations(
-            status_filter=status, benchmark_filter=benchmark
+            status_filter=status, benchmark_name_filter=benchmark
         )
 
         if not evaluations:
@@ -218,10 +239,10 @@ def list_evaluations(ctx: click.Context, status: str, benchmark: str) -> None:
 
         for evaluation in evaluations:
             # Format short ID
-            short_id = str(evaluation["evaluation_id"])[:8]
+            short_id = str(evaluation.evaluation_id)[:8]
 
             # Format status with color
-            status_text = evaluation["status"]
+            status_text = evaluation.status
             status_style = {
                 "completed": "green",
                 "failed": "red",
@@ -232,15 +253,15 @@ def list_evaluations(ctx: click.Context, status: str, benchmark: str) -> None:
 
             # Format agent type
             agent_display = {"chain_of_thought": "cot", "none": "none"}.get(
-                evaluation["agent_type"], evaluation["agent_type"]
+                evaluation.agent_type, evaluation.agent_type
             )
 
             # Format accuracy
-            accuracy = evaluation.get("accuracy")
+            accuracy = evaluation.accuracy
             accuracy_text = f"{accuracy:.1f}%" if accuracy is not None else "-"
 
             # Format created time (relative)
-            created_at = evaluation["created_at"]
+            created_at = evaluation.created_at
             time_diff = (datetime.now() - created_at).total_seconds()
             if time_diff < 3600:  # Less than 1 hour
                 time_text = f"{int(time_diff / 60)} min ago"
@@ -253,8 +274,8 @@ def list_evaluations(ctx: click.Context, status: str, benchmark: str) -> None:
                 short_id,
                 f"[{status_style}]{status_text}[/{status_style}]",
                 agent_display,
-                evaluation["model_name"],
-                evaluation["benchmark_name"],
+                evaluation.model_name,
+                evaluation.benchmark_name,
                 accuracy_text,
                 time_text,
             )

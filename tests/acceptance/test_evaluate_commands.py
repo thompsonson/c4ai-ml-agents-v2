@@ -40,7 +40,7 @@ class TestEvaluateCommands:
 
         with patch("ml_agents_v2.cli.main.Container") as mock_container:
             mock_orchestrator = Mock()
-            mock_orchestrator.create_evaluation.return_value = mock_evaluation
+            mock_orchestrator.create_evaluation.return_value = mock_evaluation_id
 
             mock_container_instance = Mock()
             mock_container_instance.evaluation_orchestrator.return_value = (
@@ -96,7 +96,7 @@ class TestEvaluateCommands:
 
         with patch("ml_agents_v2.cli.main.Container") as mock_container:
             mock_orchestrator = Mock()
-            mock_orchestrator.create_evaluation.return_value = mock_evaluation
+            mock_orchestrator.create_evaluation.return_value = mock_evaluation_id
 
             mock_container_instance = Mock()
             mock_container_instance.evaluation_orchestrator.return_value = (
@@ -426,7 +426,7 @@ class TestEvaluateCommands:
 
         with patch("ml_agents_v2.cli.main.Container") as mock_container:
             mock_orchestrator = Mock()
-            mock_orchestrator.create_evaluation.return_value = mock_evaluation
+            mock_orchestrator.create_evaluation.return_value = evaluation_id
             mock_orchestrator.execute_evaluation.return_value = None
             mock_orchestrator.list_evaluations.return_value = [
                 {
