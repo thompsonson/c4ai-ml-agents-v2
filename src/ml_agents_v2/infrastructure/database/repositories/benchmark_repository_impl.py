@@ -19,13 +19,14 @@ from ml_agents_v2.core.domain.repositories.preprocessed_benchmark_repository imp
 from ml_agents_v2.infrastructure.database.models.benchmark import BenchmarkModel
 from ml_agents_v2.infrastructure.database.session_manager import DatabaseSessionManager
 
-# Benchmark registry mapping user-friendly names to dataset files
+# Benchmark registry mapping user-friendly names to database stored names
+# Updated to reflect actual stored names in database rather than file names
 BENCHMARK_REGISTRY = {
-    "GPQA": "BENCHMARK-01-GPQA.csv",
-    "FOLIO": "BENCHMARK-05-FOLIO.csv",
-    "BBEH": "BENCHMARK-06-BBEH.csv",
-    "MATH3": "BENCHMARK-07-MATH3.csv",
-    "LeetCode_Python_Easy": "BENCHMARK-08-LeetCode_Python_Easy.csv",
+    "GPQA": "GPQA",
+    "FOLIO": "FOLIO",
+    "BBEH": "BBEH",
+    "MATH3": "MATH3",
+    "LeetCode_Python_Easy": "LeetCode_Python_Easy",
 }
 
 

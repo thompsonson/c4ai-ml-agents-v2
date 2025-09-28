@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from ...domain.entities.preprocessed_benchmark import PreprocessedBenchmark
 from ...domain.repositories.preprocessed_benchmark_repository import (
     PreprocessedBenchmarkRepository,
 )
+from ....infrastructure.csv.benchmark_csv_reader import BenchmarkCsvReader
 from ..dto.benchmark_info import BenchmarkInfo
 from ..dto.validation_result import ValidationResult
 from .exceptions import BenchmarkNotFoundError
@@ -33,6 +36,7 @@ class BenchmarkProcessor:
             benchmark_repository: Repository for benchmark persistence
         """
         self._benchmark_repo = benchmark_repository
+        self._csv_reader = BenchmarkCsvReader()
         self._logger = logging.getLogger(__name__)
 
     def list_available_benchmarks(self) -> list[BenchmarkInfo]:
@@ -284,6 +288,117 @@ class BenchmarkProcessor:
         if errors:
             return ValidationResult.failure(errors, warnings)
         return ValidationResult.success(warnings)
+
+    def import_benchmark_from_csv(
+        self,
+        csv_file_path: str,
+        benchmark_name: str | None = None,
+        description: str | None = None,
+    ) -> BenchmarkInfo:
+        """Import benchmark from CSV file with INPUT,OUTPUT columns.
+
+        Args:
+            csv_file_path: Path to CSV file containing INPUT,OUTPUT columns
+            benchmark_name: Optional custom name (defaults to filename)
+            description: Optional benchmark description
+
+        Returns:
+            BenchmarkInfo for the imported benchmark
+
+        Raises:
+            BenchmarkNotFoundError: If CSV file doesn't exist
+            ValidationError: If benchmark name already exists or CSV format invalid
+            ExternalServiceError: If repository save operation fails
+        """
+        self._logger.info(
+            "Importing benchmark from CSV",
+            extra={"csv_file_path": csv_file_path, "benchmark_name": benchmark_name},
+        )
+
+        try:
+            # Validate CSV file exists and has correct format
+            csv_path = Path(csv_file_path)
+            if not csv_path.exists():
+                raise BenchmarkNotFoundError(f"CSV file not found: {csv_file_path}")
+
+            # Validate CSV format before processing
+            is_valid, validation_errors = self._csv_reader.validate_csv_format(csv_file_path)
+            if not is_valid:
+                from .exceptions import ValidationError
+                raise ValidationError(f"Invalid CSV format: {'; '.join(validation_errors)}")
+
+            # Generate benchmark name from filename if not provided
+            if benchmark_name is None:
+                benchmark_name = csv_path.stem  # Filename without extension
+
+            # Generate description if not provided
+            if description is None:
+                description = f"Benchmark imported from {csv_path.name}"
+
+            # Validate benchmark name doesn't already exist
+            name_validation = self.validate_benchmark_name(benchmark_name)
+            if not name_validation.is_valid:
+                from .exceptions import ValidationError
+                raise ValidationError(f"Benchmark name validation failed: {'; '.join(name_validation.errors)}")
+
+            # Read questions from CSV
+            questions = self._csv_reader.read_questions_from_csv(csv_file_path)
+
+            if not questions:
+                from .exceptions import ValidationError
+                raise ValidationError("No valid questions found in CSV file")
+
+            # Create PreprocessedBenchmark entity
+            benchmark = PreprocessedBenchmark(
+                benchmark_id=uuid.uuid4(),
+                name=benchmark_name,
+                description=description,
+                questions=questions,
+                metadata={
+                    "source_file": str(csv_path),
+                    "import_date": datetime.now().isoformat(),
+                    "format_version": "1.0",
+                },
+                created_at=datetime.now(),
+                question_count=len(questions),
+                format_version="1.0",
+            )
+
+            # Save to repository
+            self._benchmark_repo.save(benchmark)
+
+            # Convert to BenchmarkInfo for return
+            benchmark_info = self._benchmark_to_info(benchmark)
+
+            self._logger.info(
+                "Successfully imported benchmark from CSV",
+                extra={
+                    "benchmark_name": benchmark_name,
+                    "question_count": len(questions),
+                    "csv_file": csv_file_path,
+                },
+            )
+
+            return benchmark_info
+
+        except BenchmarkNotFoundError:
+            raise
+        except Exception as e:
+            self._logger.error(
+                "Failed to import benchmark from CSV",
+                extra={"csv_file_path": csv_file_path, "error": str(e)},
+            )
+
+            # Map specific exception types
+            if "validation" in str(e).lower() or "invalid" in str(e).lower():
+                from .exceptions import ValidationError
+                raise ValidationError(f"Benchmark import validation failed: {e}") from e
+
+            from .exceptions import ExternalServiceError
+            raise ExternalServiceError(
+                f"Failed to import benchmark from CSV: {e}",
+                service_name="benchmark_processor",
+            ) from e
 
     def _benchmark_to_info(self, benchmark: PreprocessedBenchmark) -> BenchmarkInfo:
         """Convert benchmark entity to info DTO.

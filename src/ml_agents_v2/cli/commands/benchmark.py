@@ -34,7 +34,7 @@ def list_benchmarks(ctx: click.Context) -> None:
         benchmark_processor = container.benchmark_processor()
 
         # Get list of benchmarks
-        benchmarks = benchmark_processor.list_benchmarks()
+        benchmarks = benchmark_processor.list_available_benchmarks()
 
         if not benchmarks:
             console.print("No benchmarks available.", style="yellow")
@@ -48,6 +48,49 @@ def list_benchmarks(ctx: click.Context) -> None:
 
     except Exception as e:
         console.print(f"✗ Error listing benchmarks: {str(e)}", style="red")
+        ctx.exit(1)
+
+
+@benchmark.command("import")
+@click.argument("csv_path", type=click.Path(exists=True, dir_okay=False, readable=True))
+@click.option("--name", help="Benchmark name (defaults to filename)")
+@click.option("--description", help="Benchmark description")
+@click.pass_context
+def import_benchmark(ctx: click.Context, csv_path: str, name: str, description: str) -> None:
+    """Import benchmark from CSV file with INPUT,OUTPUT columns."""
+    try:
+        container = ctx.obj["container"]
+        benchmark_processor = container.benchmark_processor()
+
+        # Import benchmark from CSV
+        console.print(f"📥 Importing benchmark from {csv_path}...", style="blue")
+
+        benchmark_info = benchmark_processor.import_benchmark_from_csv(
+            csv_file_path=csv_path,
+            benchmark_name=name,
+            description=description
+        )
+
+        console.print(
+            f"✅ Successfully imported benchmark '{benchmark_info.name}' "
+            f"with {benchmark_info.question_count} questions",
+            style="green"
+        )
+
+        # Display summary
+        table = Table(title="Imported Benchmark Summary")
+        table.add_column("Property", style="cyan")
+        table.add_column("Value", style="white")
+
+        table.add_row("Name", benchmark_info.name)
+        table.add_row("Description", benchmark_info.description)
+        table.add_row("Questions", str(benchmark_info.question_count))
+        table.add_row("Format Version", benchmark_info.format_version)
+
+        console.print(table)
+
+    except Exception as e:
+        console.print(f"✗ Error importing benchmark: {str(e)}", style="red")
         ctx.exit(1)
 
 
@@ -117,16 +160,16 @@ def _display_verbose_benchmark_list(benchmarks: list[PreprocessedBenchmark]) -> 
     console.print(table)
 
 
-def _display_benchmark_details(benchmark: PreprocessedBenchmark) -> None:
-    """Display detailed information about a specific benchmark."""
+def _display_benchmark_details(benchmark) -> None:
+    """Display detailed information about a specific benchmark (BenchmarkInfo DTO)."""
     # Main information panel
     info_content = f"""
 [bold]{benchmark.name}[/bold]
 
-[dim]Description:[/dim]
+Description:
 {benchmark.description}
 
-[dim]Statistics:[/dim]
+Statistics:
 • Questions: {benchmark.question_count}
 • Format Version: {benchmark.format_version}
 • Created: {benchmark.created_at.strftime('%Y-%m-%d %H:%M:%S')}
@@ -136,43 +179,6 @@ def _display_benchmark_details(benchmark: PreprocessedBenchmark) -> None:
         Panel(info_content.strip(), title="Benchmark Details", border_style="blue")
     )
 
-    # Metadata section
-    if benchmark.metadata:
-        metadata_table = Table(title="Metadata")
-        metadata_table.add_column("Property", style="cyan")
-        metadata_table.add_column("Value", style="dim")
-
-        for key, value in benchmark.metadata.items():
-            metadata_table.add_row(key, str(value))
-
-        console.print(metadata_table)
-
-    # Sample questions (first few)
-    questions = benchmark.get_questions()
-    if questions:
-        sample_size = min(3, len(questions))
-        sample_table = Table(
-            title=f"Sample Questions (showing {sample_size} of {len(questions)})"
-        )
-        sample_table.add_column("ID", style="cyan", no_wrap=True)
-        sample_table.add_column("Question", style="dim")
-        sample_table.add_column("Expected Answer", style="green")
-
-        for question in questions[:sample_size]:
-            # Truncate long questions for display
-            question_text = question.text
-            if len(question_text) > 80:
-                question_text = question_text[:77] + "..."
-
-            expected_answer = question.expected_answer
-            if len(expected_answer) > 30:
-                expected_answer = expected_answer[:27] + "..."
-
-            sample_table.add_row(question.id, question_text, expected_answer)
-
-        console.print(sample_table)
-
-        if len(questions) > sample_size:
-            console.print(
-                f"[dim]... and {len(questions) - sample_size} more questions[/dim]"
-            )
+    # For BenchmarkInfo, we don't have access to full metadata or questions
+    # This is expected - BenchmarkInfo is a summary DTO
+    console.print("[dim]💡 Use 'ml-agents evaluate create' to run evaluations with this benchmark[/dim]")
