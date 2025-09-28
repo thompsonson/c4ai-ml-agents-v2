@@ -1,8 +1,8 @@
 # ML Agents v2 Domain Model
 
-**Version:** 1.1
-**Date:** 2025-09-17
-**Status:** Draft
+**Version:** 1.2
+**Date:** 2025-09-28
+**Status:** Updated for Individual Question Persistence
 
 ## Overview
 
@@ -39,15 +39,14 @@ This document defines the domain model for the ML Agents v2 reasoning research p
 - `created_at`: When evaluation was initiated
 - `started_at`: When execution began
 - `completed_at`: When execution finished
-- `results`: Evaluation outcomes and metrics
 - `failure_reason`: Detailed failure information when status is 'failed'
 
 **Business Rules**:
 
 - Cannot be modified once status is 'completed' or 'failed'
 - Must have valid AgentConfig and PreprocessedBenchmark reference
-- Results can only be set when status transitions to 'completed'
 - Failure reason must be provided when status transitions to 'failed'
+- Individual question results managed separately for incremental persistence
 
 **Lifecycle States**:
 
@@ -60,9 +59,48 @@ pending → running → completed
 **Methods**:
 
 - `start_execution()`: Transition to running state
-- `complete_with_results(results: EvaluationResults)`: Complete evaluation
+- `complete()`: Mark evaluation as completed (results computed from question records)
 - `fail_with_reason(failure_reason: FailureReason)`: Mark as failed with specific reason
+- `interrupt()`: Mark as interrupted, preserving partial progress
 - `can_be_modified()`: Check if evaluation can be changed
+- `get_progress()`: Compute current progress from saved question results
+
+---
+
+#### EvaluationQuestionResult (New Entity)
+
+**Purpose**: Individual question-answer pair with complete processing details
+
+**Identity**: Composite key (evaluation_id, question_id)
+
+**Attributes**:
+
+- `id`: Unique record identifier
+- `evaluation_id`: Reference to parent evaluation
+- `question_id`: Question identifier within benchmark
+- `question_text`: Original question content
+- `expected_answer`: Ground truth answer
+- `actual_answer`: Agent's extracted answer
+- `is_correct`: Correctness evaluation result
+- `execution_time`: Processing duration in seconds
+- `token_usage`: Token consumption metrics
+- `reasoning_trace`: Step-by-step reasoning documentation
+- `error_message`: Failure description if processing failed
+- `processed_at`: When question was completed
+
+**Business Rules**:
+
+- Immutable once created (represents completed processing)
+- Must belong to existing evaluation
+- Question ID must be unique within evaluation
+- Processing time must be positive
+- Error message required if processing failed
+
+**Methods**:
+
+- `is_successful()`: Check if question was processed without errors
+- `get_token_count()`: Extract total tokens from usage metrics
+- `matches_expected()`: Verify answer correctness
 
 ---
 
@@ -188,9 +226,9 @@ This is a value object because configurations are reusable and shareable across 
 
 ---
 
-#### EvaluationResults
+#### EvaluationResults (Computed Value Object)
 
-**Purpose**: Complete evaluation outcomes and metrics
+**Purpose**: Complete evaluation outcomes and metrics computed from individual question results
 
 **Attributes**:
 
@@ -204,6 +242,27 @@ This is a value object because configurations are reusable and shareable across 
 - `summary_statistics`: Additional metrics
 
 **Immutable**: Yes
+
+**Computation Pattern**:
+
+```python
+@classmethod
+def from_question_results(cls, question_results: List[EvaluationQuestionResult]) -> 'EvaluationResults':
+    """Compute evaluation results from individual question records"""
+    total_questions = len(question_results)
+    correct_answers = sum(1 for q in question_results if q.is_correct)
+
+    return cls(
+        total_questions=total_questions,
+        correct_answers=correct_answers,
+        accuracy=correct_answers / total_questions if total_questions > 0 else 0.0,
+        average_execution_time=sum(q.execution_time for q in question_results) / total_questions,
+        total_tokens=sum(q.get_token_count() for q in question_results),
+        error_count=sum(1 for q in question_results if q.error_message),
+        detailed_results=[q.to_question_result() for q in question_results],
+        summary_statistics={}
+    )
+```
 
 **Methods**:
 
@@ -270,12 +329,15 @@ Understanding why evaluations fail is crucial for researchers to improve their a
 ```
 Evaluation (Aggregate Root)
 ├── AgentConfig (Value Object)
-│   └── → ReasoningAgentService (Domain Service)
-│       └── → Question → Answer (Value Objects)
-├── → PreprocessedBenchmark (Reference)
+│   └─→ ReasoningAgentService (Domain Service)
+│       └─→ Question → Answer (Value Objects)
+├─→ PreprocessedBenchmark (Reference)
 │   └── Questions (Value Objects)
-├── EvaluationResults (Value Object)
+├─→ EvaluationQuestionResult (Entities, one-to-many)
+│   ├── Question data (embedded)
+│   ├── Answer data (embedded)
 │   └── ReasoningTrace (Value Object)
+├── EvaluationResults (Computed Value Object)
 └── FailureReason (Value Object, when failed)
 ```
 
@@ -283,16 +345,17 @@ Evaluation (Aggregate Root)
 
 1. **Evaluation contains AgentConfig**: 1:1 relationship, but AgentConfig can be reused across multiple evaluations
 2. **Evaluation references PreprocessedBenchmark**: 1:1 relationship, benchmark exists independently
-3. **AgentConfig specifies ReasoningAgentService**: Configuration determines which service implementation to use
-4. **ReasoningAgentService processes Questions**: Service is stateless, processes questions individually
-5. **EvaluationResults aggregates Answers**: Results contain outcomes from all processed questions
-6. **FailureReason provides failure context**: Only present when evaluation fails, explains what went wrong
+3. **Evaluation → EvaluationQuestionResult**: 1:many relationship, question results saved incrementally
+4. **AgentConfig specifies ReasoningAgentService**: Configuration determines which service implementation to use
+5. **ReasoningAgentService processes Questions**: Service is stateless, processes questions individually
+6. **EvaluationResults computed from EvaluationQuestionResult**: Results aggregated from individual records
+7. **FailureReason provides failure context**: Only present when evaluation fails, explains what went wrong
 
 ## Bounded Context Boundaries
 
 ### Core Domain
 
-- **Entities**: Evaluation, PreprocessedBenchmark
+- **Entities**: Evaluation, EvaluationQuestionResult, PreprocessedBenchmark
 - **Services**: ReasoningAgentService
 - **Value Objects**: AgentConfig, Question, Answer, EvaluationResults, ReasoningTrace, FailureReason
 
@@ -309,6 +372,7 @@ Potential domain events for future implementation:
 - `EvaluationStarted`
 - `EvaluationCompleted`
 - `EvaluationFailed`
+- `EvaluationInterrupted`
 - `QuestionProcessed`
 - `BenchmarkPreprocessed`
 
@@ -318,17 +382,24 @@ Potential domain events for future implementation:
 
 1. All evaluations must have unique identifiers
 2. PreprocessedBenchmarks are immutable after creation
-3. Evaluation results can only be set once
+3. EvaluationQuestionResults are immutable once created
 4. AgentConfigs must be valid for their specified reasoning approach
 5. Failed evaluations must have a FailureReason
 
 ### Evaluation Invariants
 
 1. Cannot modify evaluation once completed or failed
-2. Results must match the number of questions in benchmark
-3. Execution time must be positive
-4. Status transitions must follow defined lifecycle
-5. FailureReason is required when status is 'failed'
+2. Status transitions must follow defined lifecycle
+3. FailureReason is required when status is 'failed'
+4. Question results can only be added during 'running' status
+
+### EvaluationQuestionResult Invariants
+
+1. Must belong to existing evaluation
+2. Question ID must be unique within evaluation
+3. Cannot be modified once created
+4. Processing time must be positive
+5. Error message required if processing failed
 
 ### PreprocessedBenchmark Invariants
 
@@ -354,6 +425,14 @@ class EvaluationRepository:
     def get_by_agent_config(self, config: AgentConfig) -> List[Evaluation]
     def get_all(self) -> List[Evaluation]
 
+class EvaluationQuestionResultRepository:
+    def save(self, question_result: EvaluationQuestionResult) -> None
+    def get_by_evaluation_id(self, evaluation_id: EvaluationId) -> List[EvaluationQuestionResult]
+    def get_by_id(self, question_result_id: UUID) -> EvaluationQuestionResult
+    def count_by_evaluation_id(self, evaluation_id: EvaluationId) -> int
+    def get_progress(self, evaluation_id: EvaluationId) -> ProgressInfo
+    def exists(self, evaluation_id: EvaluationId, question_id: str) -> bool
+
 class PreprocessedBenchmarkRepository:
     def save(self, benchmark: PreprocessedBenchmark) -> None
     def get_by_id(self, benchmark_id: BenchmarkId) -> PreprocessedBenchmark
@@ -374,11 +453,13 @@ class ReasoningAgentServiceFactory:
 
 ## Domain Model Evolution
 
-### Version 1.1 (Current)
+### Version 1.2 (Current)
 
-- Core aggregates: Evaluation, PreprocessedBenchmark
+- Core aggregates: Evaluation, EvaluationQuestionResult, PreprocessedBenchmark
+- Individual question persistence for incremental saving
 - AgentConfig as reusable value object
 - Rich failure taxonomy with FailureReason
+- Computed EvaluationResults from question records
 - 8+ reasoning approaches planned
 - SQLite persistence
 - CLI interface
@@ -390,6 +471,7 @@ class ReasoningAgentServiceFactory:
 - Experiment batching and scheduling
 - Advanced metrics and reporting
 - Multi-user access and permissions
+- Resume capability for interrupted evaluations
 
 ---
 
@@ -407,6 +489,7 @@ class ReasoningAgentServiceFactory:
 Domain model classes should be organized by aggregate:
 
 - `core/domain/evaluation/` - Evaluation aggregate
+- `core/domain/question_result/` - EvaluationQuestionResult aggregate
 - `core/domain/benchmark/` - PreprocessedBenchmark aggregate
 - `core/domain/value_objects/` - Shared value objects
 - `core/domain/services/` - Domain service interfaces
@@ -421,11 +504,13 @@ Domain model classes should be organized by aggregate:
 
 ### Key Design Rationale
 
-**AgentConfig as Value Object**: This design decision reflects that configurations are conceptual templates that can be shared and reused. Multiple researchers can use the same reasoning approach configuration, and the system recognizes these as the same thing rather than separate entities. The non-deterministic nature of LLM outputs means identical configurations can produce different results, but this variation is captured in EvaluationResults, not in the configuration itself.
+**Individual Question Persistence**: Each question-answer pair is saved immediately upon completion, enabling graceful interruption handling and incremental progress tracking. This design recognizes that partial evaluation results have independent research value.
+
+**Computed EvaluationResults**: Rather than storing results as JSON, they're computed from individual question records. This ensures consistency and enables real-time progress monitoring while maintaining the familiar EvaluationResults interface.
+
+**AgentConfig as Value Object**: This design decision reflects that configurations are conceptual templates that can be shared and reused. Multiple researchers can use the same reasoning approach configuration, and the system recognizes these as the same thing rather than separate entities.
 
 **Rich Failure Taxonomy**: Research platforms must help users understand why experiments fail. Generic "failed" status provides little actionable information, while specific failure categories help researchers identify whether issues stem from configuration problems, infrastructure limitations, or model behavior.
-
-**Immutable Benchmarks**: Ensuring benchmark consistency is crucial for research validity. While future versions might support benchmark versioning, the current model prioritizes research integrity by preventing accidental benchmark modifications that could invalidate comparative analysis.
 
 ---
 

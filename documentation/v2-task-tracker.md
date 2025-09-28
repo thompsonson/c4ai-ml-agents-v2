@@ -121,6 +121,65 @@
 
 **Documentation Updates**: Removed v2-agents.md (non-DDD document), added v2-reasoning-domain-logic.md with proper domain/infrastructure boundaries.
 
+## Phase 8: Individual Question Persistence 🔄 **IN PROGRESS**
+
+**Purpose**: Implement individual question-answer persistence for graceful interruption handling and incremental progress tracking
+
+### Database Schema Updates
+
+- [ ] Create `evaluation_question_results` table with proper indexes
+- [ ] Remove `results_json` field from `evaluations` table
+- [ ] Add database migration script for schema changes
+- [ ] Update foreign key constraints and relationships
+
+### Domain Model Updates
+
+- [ ] Add `EvaluationQuestionResult` domain entity
+- [ ] Add `EvaluationQuestionResultRepository` interface
+- [ ] Update `EvaluationResults` to computed value object pattern
+- [ ] Implement question result aggregation methods
+- [ ] Update domain invariants and business rules
+
+### Infrastructure Implementation
+
+- [ ] Implement `EvaluationQuestionResultRepositoryImpl` with SQLAlchemy
+- [ ] Add SQLAlchemy model for `EvaluationQuestionResult`
+- [ ] Update database session management for per-question transactions
+- [ ] Implement question result indexing and query optimization
+
+### Application Services Updates
+
+- [ ] Update `EvaluationOrchestrator` to save individual question results
+- [ ] Implement incremental persistence during evaluation execution
+- [ ] Add interruption handling and resume capability
+- [ ] Update progress tracking to use saved question results
+- [ ] Modify error handling for per-question failure modes
+
+### CLI Enhancements
+
+- [ ] Update progress display to show actual saved results
+- [ ] Add resume command for interrupted evaluations
+- [ ] Enhance status display with partial completion information
+- [ ] Update error messages for graceful interruption scenarios
+
+### Testing Updates
+
+- [ ] Add tests for individual question persistence patterns
+- [ ] Test interruption and resume workflows
+- [ ] Validate cross-evaluation analytics capabilities
+- [ ] Update integration tests for new repository patterns
+- [ ] Test transaction boundaries for per-question saving
+
+### Benefits Delivered
+
+- **Graceful Interruption**: Ctrl+C preserves all completed questions
+- **Incremental Progress**: Real-time progress with actual saved results
+- **Resume Capability**: Continue evaluations from exact stopping point
+- **Enhanced Analytics**: Cross-evaluation question-level analysis
+- **Research Value**: Partial evaluation results have independent value
+
+**Target**: Production-ready incremental persistence enabling robust LLM research workflows
+
 ## Implementation Order
 
 1. **Domain Layer** - Pure business logic, no dependencies
@@ -129,6 +188,7 @@
 4. **CLI** - User interface consuming application services
 5. **Testing** - Comprehensive coverage across all layers
 6. **Documentation** - Architecture documentation following DDD principles
+7. **Individual Question Persistence** - Enhanced persistence for research resilience
 
 ## Architecture Achievements
 
@@ -152,6 +212,7 @@
 - Real-time progress tracking during evaluation execution
 - Benchmarks registry with user-friendly naming
 - Multiple reasoning approach support with extensible factory pattern
+- **NEW**: Individual question persistence for interruption resilience
 
 ### Infrastructure Sophistication
 
@@ -167,3 +228,4 @@
 - Maintain spec-driven approach: implementation follows documentation
 - Use AI for consistent code generation from specifications
 - Domain logic kept separate from infrastructure concerns following DDD principles
+- Phase 8 focuses on production-ready persistence patterns for LLM research workflows

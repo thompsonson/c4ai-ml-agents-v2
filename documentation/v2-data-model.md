@@ -1,8 +1,8 @@
 # ML Agents v2 Data Model Specification
 
-**Version:** 1.0
-**Date:** 2025-09-17
-**Purpose:** Define data structures before SQL schema implementation
+**Version:** 1.1
+**Date:** 2025-09-28
+**Purpose:** Define data structures for individual question-answer persistence
 
 ## Core Data Entities
 
@@ -17,7 +17,6 @@ Evaluation {
     created_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
-    results: EvaluationResults | None      # Complex object when completed
     failure_reason: FailureReason | None   # Complex object when failed
 }
 ```
@@ -25,8 +24,33 @@ Evaluation {
 **Storage Decisions:**
 
 - `agent_config`: Store as JSON to preserve value object semantics
-- `results`: Store as JSON blob for flexibility, extract key metrics for indexing
 - `failure_reason`: Store as JSON with category field extracted for querying
+- **Results removed**: Now computed dynamically from question results table
+
+### EvaluationQuestionResult (New Entity)
+
+```python
+EvaluationQuestionResult {
+    id: UUID                               # Primary key
+    evaluation_id: UUID                    # Foreign key to evaluations
+    question_id: str                       # Question identifier within benchmark
+    question_text: str                     # Question content
+    expected_answer: str                   # Ground truth answer
+    actual_answer: str                     # Agent's extracted answer
+    is_correct: bool                       # Correctness evaluation
+    execution_time: float                  # Seconds taken to process
+    token_usage_json: str                  # TokenUsage object as JSON
+    reasoning_trace_json: str              # ReasoningTrace object as JSON
+    error_message: str | None              # If question processing failed
+    processed_at: datetime                 # When question was completed
+}
+```
+
+**Storage Decisions:**
+
+- One row per question-answer pair for incremental persistence
+- Preserve complex objects (TokenUsage, ReasoningTrace) as JSON
+- Enable graceful interruption and resume capabilities
 
 ### PreprocessedBenchmark (Aggregate Root)
 
@@ -45,9 +69,8 @@ PreprocessedBenchmark {
 
 **Storage Decisions:**
 
-- `questions`: JSON array, indexed by question_id for retrieval
-- `metadata`: JSON object for extensibility
-- `question_count`: Denormalized for quick access
+- `questions`: JSON array for benchmark definition
+- Individual question results stored separately in evaluation_question_results
 
 ## Value Objects
 
@@ -59,7 +82,7 @@ AgentConfig {
     model_provider: str                    # openrouter
     model_name: str                        # claude-3-sonnet, gpt-4, etc.
     model_parameters: Dict[str, Any]       # temperature, max_tokens, etc.
-    agent_parameters: Dict[str, Any]   # agent-specific config
+    agent_parameters: Dict[str, Any]       # agent-specific config
 }
 ```
 
@@ -76,58 +99,39 @@ Question {
 }
 ```
 
-### Answer
-
-```python
-Answer {
-    extracted_answer: str                  # Final answer
-    reasoning_trace: ReasoningTrace        # Structured reasoning info
-    confidence: float | None               # Optional confidence score
-    execution_time: float                  # Seconds
-    token_usage: TokenUsage                # Token consumption metrics
-    raw_response: str                      # Full model response
-}
-```
-
-### EvaluationResults
+### EvaluationResults (Computed Value Object)
 
 ```python
 EvaluationResults {
-    total_questions: int
-    correct_answers: int
+    total_questions: int                   # Computed from question results
+    correct_answers: int                   # Computed from question results
     accuracy: float                        # Computed field
-    average_execution_time: float
-    total_tokens: int
-    error_count: int
-    detailed_results: List[QuestionResult] # Per-question outcomes
-    summary_statistics: Dict[str, Any]     # Additional metrics
+    average_execution_time: float          # Computed from question results
+    total_tokens: int                      # Computed from question results
+    error_count: int                       # Computed from question results
+    detailed_results: List[QuestionResult] # Loaded from question results table
+    summary_statistics: Dict[str, Any]     # Additional computed metrics
 }
 ```
 
-### QuestionResult
+**Computation Pattern:**
 
 ```python
-QuestionResult {
-    question_id: str
-    question_text: str
-    expected_answer: str
-    actual_answer: str
-    is_correct: bool
-    reasoning_trace: ReasoningTrace
-    execution_time: float
-    token_usage: TokenUsage
-    error: str | None                      # If processing failed
-}
-```
+@classmethod
+def from_database(cls, evaluation_id: UUID, question_repo: QuestionResultRepository) -> 'EvaluationResults':
+    """Compute evaluation results from individual question records"""
+    question_results = question_repo.get_by_evaluation_id(evaluation_id)
 
-### ReasoningTrace
-
-```python
-ReasoningTrace {
-    approach_type: str                     # none, cot, pot, etc.
-    reasoning_text: str                    # Empty for "none", steps for others
-    logprob_confidence: float | None       # When supported by model
-}
+    return cls(
+        total_questions=len(question_results),
+        correct_answers=sum(1 for q in question_results if q.is_correct),
+        accuracy=correct_answers / total_questions if total_questions > 0 else 0.0,
+        average_execution_time=sum(q.execution_time for q in question_results) / total_questions,
+        total_tokens=sum(q.get_token_count() for q in question_results),
+        error_count=sum(1 for q in question_results if q.error_message),
+        detailed_results=question_results,
+        summary_statistics={}
+    )
 ```
 
 ### FailureReason
@@ -151,44 +155,87 @@ FailureCategory = Enum[
 ]
 ```
 
-### TokenUsage
-
-```python
-TokenUsage {
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
-}
-```
-
 ## Data Relationships and Constraints
 
 ### Primary Relationships
 
-- `Evaluation` → `PreprocessedBenchmark` (many-to-one)
+- `Evaluation` â†' `PreprocessedBenchmark` (many-to-one)
+- `Evaluation` â†' `EvaluationQuestionResult` (one-to-many)
 - `Evaluation` contains `AgentConfig` (embedded)
-- `Evaluation` contains `EvaluationResults` (embedded when completed)
 - `Evaluation` contains `FailureReason` (embedded when failed)
+- `EvaluationResults` computed from `EvaluationQuestionResult` records
 
 ### Key Constraints
 
 1. **Evaluation Status Logic:**
 
-   - `results` must be NULL unless `status = 'completed'`
    - `failure_reason` must be NULL unless `status = 'failed'`
    - `started_at` must be NULL if `status = 'pending'`
-   - `completed_at` must be NULL unless `status IN ('completed', 'failed')`
+   - `completed_at` must be NULL unless `status IN ('completed', 'failed', 'interrupted')`
 
-2. **AgentConfig Validation:**
+2. **Question Result Integrity:**
+
+   - `(evaluation_id, question_id)` must be unique
+   - `evaluation_id` must reference existing evaluation
+   - `processed_at` must be after evaluation `started_at`
+
+3. **AgentConfig Validation:**
 
    - `model_parameters` must be valid JSON object
    - `agent_parameters` must be valid JSON object
    - `agent_type` must be in supported types list
 
-3. **Benchmark Integrity:**
+4. **Benchmark Integrity:**
    - `name` must be unique across all benchmarks
    - `question_count` must equal `len(questions)`
    - All questions must have non-empty `text` and `expected_answer`
+
+## Database Schema
+
+### Core Tables
+
+```sql
+-- Evaluations table (simplified)
+CREATE TABLE evaluations (
+    evaluation_id UUID PRIMARY KEY,
+    agent_config_json TEXT NOT NULL,
+    preprocessed_benchmark_id UUID NOT NULL REFERENCES preprocessed_benchmarks(benchmark_id),
+    status VARCHAR(20) NOT NULL CHECK (status IN ('pending', 'running', 'completed', 'failed', 'interrupted')),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    failure_reason_json TEXT
+);
+
+-- New question results table
+CREATE TABLE evaluation_question_results (
+    id UUID PRIMARY KEY,
+    evaluation_id UUID NOT NULL REFERENCES evaluations(evaluation_id) ON DELETE CASCADE,
+    question_id VARCHAR(50) NOT NULL,
+    question_text TEXT NOT NULL,
+    expected_answer TEXT NOT NULL,
+    actual_answer TEXT NOT NULL,
+    is_correct BOOLEAN NOT NULL,
+    execution_time FLOAT NOT NULL,
+    token_usage_json TEXT,
+    reasoning_trace_json TEXT,
+    error_message TEXT,
+    processed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(evaluation_id, question_id)
+);
+
+-- Preprocessed benchmarks table (unchanged)
+CREATE TABLE preprocessed_benchmarks (
+    benchmark_id UUID PRIMARY KEY,
+    name VARCHAR(100) UNIQUE NOT NULL,
+    description TEXT NOT NULL,
+    questions_json TEXT NOT NULL,
+    metadata_json TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    question_count INTEGER NOT NULL,
+    format_version VARCHAR(20) NOT NULL
+);
+```
 
 ## Indexing Strategy
 
@@ -206,6 +253,15 @@ CREATE UNIQUE INDEX idx_benchmarks_name ON preprocessed_benchmarks(name);
 
 -- Query evaluations by agent configuration similarity
 CREATE INDEX idx_evaluations_agent_hash ON evaluations(agent_config_hash);
+
+-- NEW: Question results by evaluation (most common query)
+CREATE INDEX idx_question_results_evaluation ON evaluation_question_results(evaluation_id);
+
+-- NEW: Question results by correctness for analytics
+CREATE INDEX idx_question_results_correctness ON evaluation_question_results(is_correct);
+
+-- NEW: Question results by processing time
+CREATE INDEX idx_question_results_processed_at ON evaluation_question_results(processed_at);
 ```
 
 ### JSON Field Indexing (SQLite 3.45+ / PostgreSQL)
@@ -213,11 +269,15 @@ CREATE INDEX idx_evaluations_agent_hash ON evaluations(agent_config_hash);
 ```sql
 -- Index failure categories for filtering
 CREATE INDEX idx_evaluations_failure_category
-ON evaluations(json_extract(failure_reason, '$.category'));
+ON evaluations(json_extract(failure_reason_json, '$.category'));
 
 -- Index agent types for analysis
 CREATE INDEX idx_evaluations_agent_type
-ON evaluations(json_extract(agent_config, '$.agent_type'));
+ON evaluations(json_extract(agent_config_json, '$.agent_type'));
+
+-- NEW: Index token usage for analytics
+CREATE INDEX idx_question_results_token_usage
+ON evaluation_question_results(json_extract(token_usage_json, '$.total_tokens'));
 ```
 
 ## Data Size Estimates
@@ -225,15 +285,23 @@ ON evaluations(json_extract(agent_config, '$.agent_type'));
 ### Typical Object Sizes
 
 - `AgentConfig`: ~200-500 bytes (JSON)
-- `Question`: ~100-2000 bytes (varies by benchmark)
-- `Answer`: ~500-5000 bytes (depends on reasoning length)
-- `EvaluationResults`: ~10KB-1MB (depends on question count and detail level)
+- `EvaluationQuestionResult`: ~1-5KB per record (depends on reasoning length)
+- `TokenUsage`: ~100 bytes (JSON)
+- `ReasoningTrace`: ~500-3000 bytes (depends on approach)
 
 ### Storage Projections
 
-- 1000 evaluations × 100KB average = ~100MB
-- 50 benchmarks × 10MB average = ~500MB
-- Total: ~600MB for substantial research dataset
+- 1000 evaluations with 150 questions each = 150,000 question result records
+- Average 2KB per question result = ~300MB for question results
+- Evaluation metadata: 1000 × 1KB = ~1MB
+- Benchmark data: 50 × 10MB = ~500MB
+- **Total: ~800MB for substantial research dataset**
+
+### Performance Characteristics
+
+- Individual question insert: ~1ms
+- Evaluation summary computation: ~10-50ms (depending on question count)
+- Cross-evaluation analytics: ~100-500ms (with proper indexing)
 
 ## Migration and Evolution Strategy
 
@@ -241,7 +309,7 @@ ON evaluations(json_extract(agent_config, '$.agent_type'));
 
 - `format_version` field in benchmarks supports data migration
 - JSON fields provide flexibility for adding new attributes
-- Separate migration scripts for structural changes
+- Individual question records enable granular data evolution
 
 ### Backward Compatibility
 
@@ -253,16 +321,42 @@ ON evaluations(json_extract(agent_config, '$.agent_type'));
 
 ### Transactional Boundaries
 
-- Evaluation creation, execution, and completion as separate transactions
-- Benchmark preprocessing as atomic operation
-- Results storage with optimistic concurrency control
+- **Question Processing**: Individual question result as single transaction
+- **Evaluation State Updates**: Separate transaction for status changes
+- **Summary Computation**: Read-only aggregation queries
 
 ### Validation Layers
 
 1. **Domain Level:** Entity and value object invariants
 2. **Application Level:** Cross-aggregate consistency
-3. **Database Level:** Constraints and triggers
+3. **Database Level:** Constraints and foreign keys
 4. **API Level:** Input validation and sanitization
+
+## Benefits of Individual Question Persistence
+
+### Incremental Progress
+
+- Save each question result immediately upon completion
+- No data loss on evaluation interruption or system crashes
+- Resume evaluations from exact stopping point
+
+### Real-time Analytics
+
+- Track evaluation progress with actual saved results
+- Compute running accuracy during evaluation execution
+- Enable early stopping based on interim performance
+
+### Cross-evaluation Analysis
+
+- Compare question-level performance across different agents
+- Analyze question difficulty patterns across models
+- Identify systematic failure modes in reasoning approaches
+
+### Research Workflow Enhancement
+
+- Partial evaluation results have independent research value
+- Question-level error analysis for debugging reasoning approaches
+- Flexible evaluation scheduling and resource management
 
 ## See Also
 
