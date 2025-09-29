@@ -162,6 +162,62 @@ class ReasoningAgentService:
 
 **Implementation Patterns**: See [Reasoning Domain Logic](v2-reasoning-domain-logic.md) for complete domain boundaries, business rule implementations, and infrastructure integration patterns.
 
+---
+
+#### LLMClient
+
+**Purpose**: Domain interface for LLM interactions, ensuring complete isolation from external API implementations
+
+The LLMClient interface defines what the domain needs from LLM providers without exposing any external API implementation details. This interface acts as an Anti-Corruption Layer boundary, ensuring that domain logic never depends on external system types or behavior.
+
+**Domain Responsibilities:**
+
+- Provide consistent LLM interaction interface regardless of provider
+- Return standardized domain types (ParsedResponse) only
+- Abstract away external API complexity and type variations
+- Enable testing with domain-focused mock implementations
+
+**Interface**:
+
+```python
+from abc import ABC, abstractmethod
+from typing import List, Dict, Any
+
+class LLMClient(ABC):
+    """Domain interface for LLM interactions.
+
+    Infrastructure implementations must translate all external API responses
+    to domain ParsedResponse objects, ensuring no external types leak into
+    domain or application layers.
+    """
+
+    @abstractmethod
+    async def chat_completion(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        **kwargs
+    ) -> ParsedResponse:
+        """Execute chat completion and return domain ParsedResponse.
+
+        Args:
+            model: Model identifier (e.g., "gpt-4", "claude-3-sonnet")
+            messages: Conversation messages in standard format
+            **kwargs: Model-specific parameters (temperature, max_tokens, etc.)
+
+        Returns:
+            ParsedResponse: Domain value object with standardized token usage
+
+        Raises:
+            Domain exceptions only - never external API exceptions
+        """
+        pass
+```
+
+**Anti-Corruption Layer Principle**: Infrastructure implementations of this interface MUST translate all external API responses, errors, and types to domain equivalents immediately upon receipt. The domain layer should never import or depend on external LLM provider types.
+
+**Testing Benefits**: Domain logic can be tested with simple mock implementations that return known ParsedResponse objects, without requiring external API access or complex mocking of provider-specific types.
+
 ### Value Objects
 
 #### AgentConfig
@@ -323,6 +379,120 @@ Understanding why evaluations fail is crucial for researchers to improve their a
 
 - `is_recoverable()`: Whether retry might succeed
 - `get_category_description()`: Human-friendly explanation of failure type
+
+---
+
+#### TokenUsage
+
+**Purpose**: Standardized representation of LLM token consumption metrics
+
+Token usage tracking is a core domain concept essential for cost analysis, performance monitoring, and research reproducibility. This value object provides a consistent interface regardless of underlying LLM provider variations.
+
+**Attributes**:
+
+- `prompt_tokens`: Number of tokens in the input prompt
+- `completion_tokens`: Number of tokens in the model's response
+- `total_tokens`: Total tokens consumed (prompt + completion)
+
+**Business Rules**:
+
+- All token counts must be non-negative
+- `total_tokens` must equal `prompt_tokens + completion_tokens`
+- Immutable once created (represents completed API call)
+
+**Methods**:
+
+```python
+@dataclass(frozen=True)
+class TokenUsage:
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+    def __post_init__(self) -> None:
+        """Validate token counts and business rules."""
+        if self.prompt_tokens < 0 or self.completion_tokens < 0 or self.total_tokens < 0:
+            raise ValueError("Token counts cannot be negative")
+        if self.total_tokens != self.prompt_tokens + self.completion_tokens:
+            raise ValueError("total_tokens must equal prompt_tokens + completion_tokens")
+
+    def to_dict(self) -> dict[str, int]:
+        """Serialize for storage and reporting."""
+        return {
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+            "total_tokens": self.total_tokens,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> 'TokenUsage | None':
+        """Factory method handling various input formats from infrastructure layer."""
+        if data is None:
+            return None
+        return cls(
+            prompt_tokens=data.get("prompt_tokens", 0),
+            completion_tokens=data.get("completion_tokens", 0),
+            total_tokens=data.get("total_tokens", 0),
+        )
+```
+
+**Immutable**: Yes
+
+**Domain Rationale**: Token usage is a fundamental unit of measurement in LLM research, requiring consistent representation across different providers and models.
+
+---
+
+#### ParsedResponse
+
+**Purpose**: Standardized representation of structured LLM responses
+
+Provides a clean boundary between external API response formats and domain processing, ensuring consistent handling regardless of underlying LLM provider implementation details.
+
+**Attributes**:
+
+- `content`: Raw text content from the LLM response
+- `structured_data`: Parsed structured output (when using structured output modes)
+- `token_usage`: Token consumption metrics (TokenUsage value object)
+
+**Business Rules**:
+
+- Content must not be empty for successful responses
+- Structured data is optional (None for text-only responses)
+- Token usage may be None if provider doesn't report metrics
+- Immutable once created
+
+**Methods**:
+
+```python
+@dataclass(frozen=True)
+class ParsedResponse:
+    content: str
+    structured_data: dict | None = None
+    token_usage: TokenUsage | None = None
+
+    def __post_init__(self) -> None:
+        """Validate response content."""
+        if not self.content or not self.content.strip():
+            raise ValueError("Response content cannot be empty")
+
+    def has_structured_data(self) -> bool:
+        """Check if response includes parsed structured output."""
+        return self.structured_data is not None
+
+    def get_token_count(self) -> int:
+        """Extract total tokens, handling None gracefully."""
+        if self.token_usage is None:
+            return 0
+        return self.token_usage.total_tokens
+
+    def get_content_length(self) -> int:
+        """Get character count of response content."""
+        return len(self.content)
+```
+
+**Immutable**: Yes
+
+**Domain Rationale**: Abstracts away external API response format variations, providing a consistent interface for domain logic regardless of whether the response came from OpenAI, Anthropic, or other providers.
 
 ## Domain Relationships
 

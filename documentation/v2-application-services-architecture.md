@@ -64,15 +64,28 @@ Primary service coordinating evaluation lifecycle with incremental question pers
 
 ```python
 class EvaluationOrchestrator:
+    """Application service orchestrating evaluation workflows.
+
+    Follows Dependency Inversion Principle by depending only on domain interfaces,
+    never on infrastructure implementations. This ensures testability and
+    isolation from external system changes.
+    """
+
     def __init__(
         self,
-        evaluation_repo: EvaluationRepository,
-        question_result_repo: EvaluationQuestionResultRepository,
-        benchmark_repo: PreprocessedBenchmarkRepository,
-        reasoning_service_factory: ReasoningAgentServiceFactory,
+        llm_client: LLMClient,  # Domain interface - not infrastructure class
+        evaluation_repo: EvaluationRepository,  # Domain interface
+        question_result_repo: EvaluationQuestionResultRepository,  # Domain interface
+        benchmark_repo: PreprocessedBenchmarkRepository,  # Domain interface
+        reasoning_service_factory: ReasoningAgentServiceFactory,  # Domain service
         config: ApplicationConfig
     ):
-        pass
+        self.llm_client = llm_client  # Anti-Corruption Layer boundary
+        self.evaluation_repo = evaluation_repo
+        self.question_result_repo = question_result_repo
+        self.benchmark_repo = benchmark_repo
+        self.reasoning_service_factory = reasoning_service_factory
+        self.config = config
 
     def create_evaluation(
         self,
@@ -494,10 +507,148 @@ graph TD
 
 ### Interface Contracts
 
+Following Dependency Inversion Principle, application services depend only on domain interfaces:
+
 - **Repository Interfaces:** Domain-driven, infrastructure-agnostic
-- **External Service Interfaces:** Abstracted behind domain services
+- **LLM Client Interface:** Domain `LLMClient` interface returning domain `ParsedResponse` objects
+- **Domain Service Interfaces:** Pure business logic without infrastructure dependencies
 - **Configuration Interfaces:** Environment-aware, validation included
 - **Question Result Interfaces:** Incremental persistence with immediate consistency
+
+**Type Isolation Contract**: Application services NEVER import or depend on external API types (openai, instructor, httpx, etc.). All external types are translated to domain types by infrastructure Anti-Corruption Layer.
+
+## Anti-Corruption Layer Type Isolation Principles
+
+### Architectural Boundary Rules
+
+Following Clean Architecture and Domain-Driven Design principles, the application enforces strict type isolation across layer boundaries:
+
+#### 1. Domain Layer (Core)
+```python
+# ✅ ALLOWED: Pure domain types
+from core.domain.value_objects.token_usage import TokenUsage
+from core.domain.value_objects.parsed_response import ParsedResponse
+from core.domain.services.llm_client import LLMClient  # Interface only
+
+# ❌ FORBIDDEN: Any external API types
+# from openai import AsyncOpenAI  # NEVER import in domain
+# from instructor import from_openai  # NEVER import in domain
+# import httpx  # NEVER import in domain
+```
+
+#### 2. Application Layer (Orchestration)
+```python
+# ✅ ALLOWED: Domain interfaces and types
+from core.domain.services.llm_client import LLMClient
+from core.domain.value_objects.parsed_response import ParsedResponse
+from core.domain.repositories.evaluation_repository import EvaluationRepository
+
+# ❌ FORBIDDEN: Infrastructure implementations or external types
+# from infrastructure.llm.openrouter_client import OpenRouterClient  # Use interface
+# from openai import APIError  # External types not allowed
+```
+
+#### 3. Infrastructure Layer (Implementation)
+```python
+# ✅ ALLOWED: Implements domain interfaces, imports external types
+from core.domain.services.llm_client import LLMClient  # Implements this
+from core.domain.value_objects.parsed_response import ParsedResponse  # Returns this
+from openai import AsyncOpenAI  # External dependency allowed here
+import instructor  # External dependency allowed here
+
+class OpenRouterClient(LLMClient):  # Implements domain interface
+    async def chat_completion(...) -> ParsedResponse:  # Returns domain type
+        # External API interaction isolated here
+        api_response = await self.client.chat.completions.create(...)
+        # Immediate translation to domain types
+        return ParsedResponse(...)
+```
+
+### Type Translation Requirements
+
+#### At Infrastructure Boundary
+```python
+def _translate_to_domain(self, api_response) -> ParsedResponse:
+    """REQUIRED: All external API responses MUST be translated to domain types.
+
+    This method represents the Anti-Corruption Layer boundary.
+    NO external types may pass through this boundary.
+    """
+    # Convert ANY external token usage format to domain TokenUsage
+    token_usage = self._normalize_token_usage(api_response.usage)
+
+    return ParsedResponse(  # Domain type - safe for upper layers
+        content=api_response.choices[0].message.content,
+        structured_data=api_response.choices[0].message.parsed,
+        token_usage=token_usage  # Domain TokenUsage, not external type
+    )
+```
+
+#### Error Translation
+```python
+def _map_external_error(self, error: Exception) -> FailureReason:
+    """REQUIRED: All external exceptions MUST be translated to domain types.
+
+    Domain and application layers NEVER see external exception types.
+    """
+    # Map external API errors to domain FailureReason
+    if isinstance(error, openai.RateLimitError):  # External type handling
+        return FailureReason(  # Domain type returned
+            category=FailureCategory.RATE_LIMIT_EXCEEDED,
+            description="Rate limit exceeded",
+            technical_details=str(error),
+            recoverable=True
+        )
+```
+
+### Import Rules by Layer
+
+| Layer | Domain Types | External Types | Infrastructure Types |
+|-------|-------------|----------------|-------------------|
+| **Domain** | ✅ Always | ❌ Never | ❌ Never |
+| **Application** | ✅ Always | ❌ Never | ❌ Never |
+| **Infrastructure** | ✅ For interfaces | ✅ For implementation | ✅ For implementation |
+
+### Testing Benefits
+
+Type isolation enables clean, fast unit testing:
+
+```python
+# Application service tests use domain mocks only
+@pytest.fixture
+def mock_llm_client():
+    """Mock domain interface - no external API dependencies."""
+    mock = Mock(spec=LLMClient)
+    mock.chat_completion.return_value = ParsedResponse(
+        content="Test answer",
+        structured_data={"answer": "42"},
+        token_usage=TokenUsage.from_dict({
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15
+        })
+    )
+    return mock
+
+async def test_evaluation_execution(orchestrator, mock_llm_client):
+    """Test uses domain types only - no external API complexity."""
+    result = await orchestrator.execute_evaluation(evaluation_id)
+
+    # Assertions work with predictable domain types
+    assert isinstance(result.token_usage, TokenUsage)
+    assert result.token_usage.total_tokens == 15
+```
+
+### Violation Detection
+
+To enforce type isolation, consider these development practices:
+
+1. **Import Linting**: Configure linters to flag external imports in domain/application layers
+2. **Dependency Analysis**: Use tools to detect dependency direction violations
+3. **Code Reviews**: Check that all external types are translated at infrastructure boundary
+4. **Integration Tests**: Verify Anti-Corruption Layer translations work correctly
+
+This approach ensures external API changes never propagate beyond the infrastructure layer, maintaining system stability and testability.
 
 ## Concurrency and Performance
 

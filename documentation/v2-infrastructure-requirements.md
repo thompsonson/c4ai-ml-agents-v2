@@ -49,62 +49,206 @@ dev = [
 ]
 ```
 
-## Structured Output Parsing Strategy
+## Anti-Corruption Layer for LLM Integration
 
 ### Overview
 
-The infrastructure layer uses two parsing strategies depending on model capabilities:
+The infrastructure layer implements an Anti-Corruption Layer (ACL) that protects the domain from external LLM API complexity and type variations. This layer ensures consistent domain types regardless of underlying provider differences.
 
-- **Structured LogProbs**: For models supporting logprobs (OpenAI models)
-- **Instructor**: For models without logprobs support (Anthropic, etc.) 
+**Key Principles:**
+- **Immediate Translation**: Convert external API responses to domain types at the boundary
+- **Type Isolation**: Domain and application layers never import external API types
+- **Consistent Interface**: All LLM providers return standardized domain `ParsedResponse` objects
+- **Error Translation**: Map external API errors to domain `FailureReason` objects
 
-### Model Capability Detection
+### Domain Interface Implementation
 
 ```python
-# infrastructure/model_capabilities.py
-@dataclass
-class ModelCapabilities:
-    supports_logprobs: bool
-    supports_streaming: bool
-    supports_function_calling: bool
-    max_tokens: int
-    provider: str
+# infrastructure/llm/openrouter_client.py
+from core.domain.services.llm_client import LLMClient
+from core.domain.value_objects.parsed_response import ParsedResponse
+from core.domain.value_objects.token_usage import TokenUsage
+from openai import AsyncOpenAI
+from typing import List, Dict, Any
+import warnings
 
-MODEL_CAPABILITIES = {
-    "openai/gpt-4o": ModelCapabilities(
-        supports_logprobs=True,
-        supports_streaming=True,
-        supports_function_calling=True,
-        max_tokens=128000,
-        provider="openai"
-    ),
-    "anthropic/claude-3-5-sonnet-20241022": ModelCapabilities(
-        supports_logprobs=False,
-        supports_streaming=True,
-        supports_function_calling=True,
-        max_tokens=200000,
-        provider="anthropic"
-    ),
-}
+class OpenRouterClient(LLMClient):
+    """Anti-Corruption Layer implementing domain LLMClient interface.
+
+    Protects domain from OpenRouter/OpenAI API implementation details by
+    translating all external types to domain value objects immediately.
+    """
+
+    def __init__(self, config: OpenRouterConfig):
+        self.config = config
+        self.client = AsyncOpenAI(
+            api_key=config.api_key,
+            base_url=config.base_url,
+            timeout=config.timeout_seconds,
+            max_retries=config.max_retries
+        )
+
+    async def chat_completion(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        **kwargs
+    ) -> ParsedResponse:
+        """Execute chat completion and return domain ParsedResponse.
+
+        This method acts as the Anti-Corruption Layer boundary - it handles
+        all external API complexity and returns only domain types.
+        """
+        try:
+            # External API call (infrastructure concern)
+            api_response = await self.client.chat.completions.create(
+                model=model,
+                messages=messages,
+                extra_headers=self._get_headers(),
+                **kwargs
+            )
+
+            # Immediate translation to domain types (ACL responsibility)
+            return self._translate_to_domain(api_response)
+
+        except Exception as e:
+            # Map external exceptions to domain failures
+            raise self._map_external_error(e)
+
+    def _translate_to_domain(self, api_response) -> ParsedResponse:
+        """Convert external API response to domain ParsedResponse.
+
+        Handles all external API response format variations and normalizes
+        to consistent domain representation.
+        """
+        # Extract content (handling different response formats)
+        content = api_response.choices[0].message.content or ""
+
+        # Extract structured data if available
+        structured_data = getattr(
+            api_response.choices[0].message, 'parsed', None
+        )
+
+        # Normalize token usage to domain TokenUsage
+        token_usage = self._normalize_token_usage(api_response.usage)
+
+        return ParsedResponse(
+            content=content,
+            structured_data=structured_data,
+            token_usage=token_usage
+        )
+
+    def _normalize_token_usage(self, usage_data) -> TokenUsage | None:
+        """Normalize any external token usage format to domain TokenUsage.
+
+        Handles:
+        - OpenAI SDK Pydantic models (usage.model_dump())
+        - OpenRouter plain dictionaries
+        - Missing usage data (None)
+        - Invalid/unexpected formats
+        """
+        if usage_data is None:
+            return None
+
+        try:
+            # Handle Pydantic models (OpenAI SDK)
+            if hasattr(usage_data, 'model_dump'):
+                data = usage_data.model_dump(mode='json')
+            # Handle plain dictionaries (OpenRouter passthrough)
+            elif isinstance(usage_data, dict):
+                data = usage_data
+            else:
+                # Unexpected type - warn and return None
+                warnings.warn(f"Unexpected token usage type: {type(usage_data)}")
+                return None
+
+            # Use domain factory method for creation
+            return TokenUsage.from_dict(data)
+
+        except Exception as e:
+            warnings.warn(f"Token usage normalization failed: {e}")
+            return None
+
+    def _map_external_error(self, error: Exception) -> Exception:
+        """Map external API errors to domain exceptions."""
+        # This would map to domain exception types
+        # Implementation depends on domain error hierarchy
+        raise error  # Placeholder - should map to domain exceptions
 ```
 
-### Parsing Strategy Implementation
+### Model Capability-Based Parsing Strategy
 
 ```python
 # infrastructure/structured_output/parsing_factory.py
-from typing import Union, Type
+from core.domain.value_objects.parsed_response import ParsedResponse
+from typing import Type
 from pydantic import BaseModel
-from structured_logprobs import StructuredLogProbsClient
-import instructor
 
-class StructuredLogProbsParser:
-    """Use structured-logprobs for models supporting logprobs."""
+class StructuredOutputParsingService:
+    """Service that handles structured output parsing with capability detection.
 
-    def __init__(self, openrouter_client: OpenRouterClient):
-        self.client = StructuredLogProbsClient(openrouter_client)
+    Uses Anti-Corruption Layer principle - returns domain types only.
+    All type normalization happens in LLMClient implementation, not here.
+    """
+
+    def __init__(self, llm_client: LLMClient):
+        self.llm_client = llm_client  # Domain interface - ACL boundary already handled
+
+    async def parse_with_structure(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        output_schema: Type[BaseModel],
+        **kwargs
+    ) -> ParsedResponse:
+        """Parse LLM response with structured output constraints.
+
+        Returns domain ParsedResponse regardless of underlying parsing strategy.
+        """
+        # Determine parsing strategy based on model capabilities
+        if self._supports_native_structured_output(model):
+            return await self._parse_with_structured_output(
+                model, messages, output_schema, **kwargs
+            )
+        else:
+            return await self._parse_with_instructor(
+                model, messages, output_schema, **kwargs
+            )
+
+    async def _parse_with_structured_output(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        output_schema: Type[BaseModel],
+        **kwargs
+    ) -> ParsedResponse:
+        """Use native structured output (OpenAI models)."""
+        json_schema = self._pydantic_to_json_schema(output_schema)
+        kwargs['response_format'] = json_schema
+        kwargs['logprobs'] = True  # Enable confidence scoring
+
+        # Call through domain interface - returns domain ParsedResponse
+        return await self.llm_client.chat_completion(model, messages, **kwargs)
+
+    async def _parse_with_instructor(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        output_schema: Type[BaseModel],
+        **kwargs
+    ) -> ParsedResponse:
+        """Use instructor library (non-OpenAI models)."""
+        # Implementation would use instructor but still return domain ParsedResponse
+        # This maintains the Anti-Corruption Layer principle
+        pass
+
+    def _supports_native_structured_output(self, model: str) -> bool:
+        """Check if model supports native structured output."""
+        # OpenAI models support structured output
+        return model.startswith(('gpt-', 'openai/gpt-'))
 
     def _pydantic_to_json_schema(self, model: Type[BaseModel]) -> dict:
-        """Convert Pydantic model to structured-logprobs format."""
+        """Convert Pydantic model to OpenAI structured output format."""
         schema = model.model_json_schema()
         return {
             "type": "json_schema",
@@ -112,91 +256,30 @@ class StructuredLogProbsParser:
                 "name": model.__name__.lower(),
                 "description": model.__doc__ or f"Schema for {model.__name__}",
                 "schema": schema,
-                "strict": True
-            }
+                "strict": True,
+            },
         }
-
-    async def parse(
-        self,
-        model: Type[BaseModel],
-        prompt: str,
-        config: AgentConfig
-    ) -> dict:
-        """Parse using structured-logprobs with confidence scoring."""
-        json_schema = self._pydantic_to_json_schema(model)
-
-        response = await self.client.create(
-            model=config.model_name,
-            messages=[{"role": "user", "content": prompt}],
-            response_format=json_schema,
-            **config.model_parameters
-        )
-
-        # Extract structured data with confidence scores
-        return {
-            "parsed_data": model.model_validate(response.choices[0].message.parsed),
-            "confidence_scores": response.choices[0].logprobs,
-            "token_usage": response.usage
-        }
-
-class InstructorParser:
-    """Use instructor for models without logprobs support."""
-
-    def __init__(self, openrouter_client: OpenRouterClient):
-        self.client = instructor.from_openai(openrouter_client.client)
-
-    async def parse(
-        self,
-        model: Type[BaseModel],
-        prompt: str,
-        config: AgentConfig
-    ) -> dict:
-        """Parse using instructor with Pydantic model directly."""
-        response = await self.client.chat.completions.create(
-            model=config.model_name,
-            messages=[{"role": "user", "content": prompt}],
-            response_model=model,
-            **config.model_parameters
-        )
-
-        return {
-            "parsed_data": response,
-            "confidence_scores": None,  # Not available without logprobs
-            "token_usage": getattr(response, '_raw_response', {}).get('usage')
-        }
-
-class OutputParserFactory:
-    """Factory for creating appropriate parser based on model capabilities."""
-
-    def __init__(self, openrouter_client: OpenRouterClient):
-        self.openrouter_client = openrouter_client
-
-    def create_parser(self, model_name: str) -> Union[StructuredLogProbsParser, InstructorParser]:
-        """Create parser based on model capabilities."""
-        capabilities = MODEL_CAPABILITIES.get(model_name)
-
-        if capabilities and capabilities.supports_logprobs:
-            return StructuredLogProbsParser(self.openrouter_client)
-        else:
-            return InstructorParser(self.openrouter_client)
 ```
 
 ### Infrastructure Output Models
 
 ```python
 # infrastructure/structured_output/models.py
-from pydantic import BaseModel, Field
-from typing import Optional
+from pydantic import BaseModel, Field, ConfigDict
 
 class BaseReasoningOutput(BaseModel):
-    """Base class for all reasoning approach output models."""
-    answer: str = Field(description="Final answer from reasoning process")
+    """Infrastructure Pydantic model for LLM structured output parsing.
 
-    class Config:
-        schema_extra = {
-            "required": ["answer"],
-            "additionalProperties": False
-        }
+    These models are used only within the infrastructure layer for
+    parsing external API responses. They are converted to domain
+    types before crossing layer boundaries.
+    """
+
+    model_config = ConfigDict(
+        json_schema_extra={"required": ["answer"], "additionalProperties": False}
+    )
+
+    answer: str = Field(description="Final answer from reasoning process")
 
 class DirectAnswerOutput(BaseReasoningOutput):
     """Infrastructure model for None agent structured output."""
@@ -207,86 +290,101 @@ class ChainOfThoughtOutput(BaseReasoningOutput):
     reasoning: str = Field(description="Step-by-step reasoning process")
 ```
 
-### ReasoningInfrastructureService Integration
+### Integration with Domain Services
 
 ```python
 # infrastructure/reasoning_service.py
+from core.domain.services.llm_client import LLMClient
+from core.domain.value_objects.parsed_response import ParsedResponse
+from core.domain.value_objects.token_usage import TokenUsage
+
 class ReasoningInfrastructureService:
-    """Infrastructure service executing domain reasoning strategies."""
+    """Infrastructure service that coordinates domain reasoning with LLM calls.
+
+    Follows Anti-Corruption Layer principle by depending ONLY on domain interfaces.
+    Never imports or depends on concrete infrastructure implementations.
+    """
 
     def __init__(
         self,
-        openrouter_client: OpenRouterClient,
-        error_mapper: OpenRouterErrorMapper
+        llm_client: LLMClient,  # Domain interface - ACL boundary handled in implementation
+        error_mapper: DomainErrorMapper  # Domain interface for error translation
     ):
-        self.openrouter_client = openrouter_client
-        self.error_mapper = error_mapper
-        self.parser_factory = OutputParserFactory(openrouter_client)
+        self.llm_client = llm_client  # Domain interface only
+        self.error_mapper = error_mapper  # Domain interface only
+        self.parsing_service = StructuredOutputParsingService(llm_client)
 
     async def execute_reasoning(
         self,
         domain_service: ReasoningAgentService,
         question: Question,
         config: AgentConfig
-    ) -> Union[Answer, FailureReason]:
-        """Execute domain reasoning strategy with structured output parsing."""
+    ) -> Answer | FailureReason:
+        """Execute domain reasoning strategy with LLM integration.
+
+        All external API complexity is handled by the Anti-Corruption Layer.
+        This service works only with domain types.
+        """
         try:
-            # Domain: Get prompt strategy and output model mapping
-            prompt_strategy = domain_service.get_prompt_strategy()
-            output_model = self._get_output_model(domain_service.get_agent_type())
+            # Domain: Generate prompt using domain logic
+            prompt = domain_service.process_question(question, config)
+            messages = [{"role": "user", "content": prompt}]
 
-            # Domain: Build base prompt
-            base_prompt = prompt_strategy.build_prompt(question)
+            # Infrastructure: Get output schema for structured parsing
+            output_schema = self._get_output_schema(domain_service.get_agent_type())
 
-            # Infrastructure: Get model-specific parser
-            parser = self.parser_factory.create_parser(config.model_name)
-
-            # Infrastructure: Parse with structured output
+            # Infrastructure: Execute LLM call through ACL
             start_time = time.time()
-            parse_result = await parser.parse(output_model, base_prompt, config)
+            parsed_response = await self.parsing_service.parse_with_structure(
+                model=config.model_name,
+                messages=messages,
+                output_schema=output_schema,
+                **config.model_parameters
+            )
             execution_time = time.time() - start_time
 
-            # Domain: Process structured data into domain result
+            # Domain: Process response using domain logic
             processing_metadata = {
                 "execution_time": execution_time,
-                "token_usage": parse_result.get("token_usage")
+                "token_usage": parsed_response.token_usage.to_dict() if parsed_response.token_usage else None,
             }
 
-            reasoning_result = domain_service.process_result(
-                self._convert_to_domain_format(parse_result["parsed_data"]),
-                processing_metadata
+            reasoning_result = domain_service.process_response(
+                parsed_response.content, processing_metadata
             )
 
-            # Infrastructure: Convert to Answer value object
-            return self._convert_to_answer(reasoning_result)
+            # Infrastructure: Convert to domain Answer using domain value objects
+            return self._convert_to_answer(reasoning_result, parsed_response.token_usage, execution_time)
 
         except Exception as e:
-            # Infrastructure: Map external errors to domain failures
+            # Infrastructure: Map external errors to domain failures using domain interface
             return self.error_mapper.map_to_failure_reason(e)
 
-    def _get_output_model(self, agent_type: str) -> Type[BaseReasoningOutput]:
-        """Map domain agent type to infrastructure output model."""
+    def _get_output_schema(self, agent_type: str) -> Type[BaseReasoningOutput]:
+        """Map domain agent type to infrastructure output schema."""
         mapping = {
             "none": DirectAnswerOutput,
-            "chain_of_thought": ChainOfThoughtOutput
+            "chain_of_thought": ChainOfThoughtOutput,
         }
         return mapping.get(agent_type, DirectAnswerOutput)
 
-    def _convert_to_domain_format(self, pydantic_output: BaseReasoningOutput) -> dict:
-        """Convert infrastructure Pydantic model to domain-compatible format."""
-        return {
-            "final_answer": pydantic_output.answer,
-            "reasoning_text": getattr(pydantic_output, 'reasoning', ''),
-        }
+    def _convert_to_answer(
+        self,
+        reasoning_result: Any,
+        token_usage: TokenUsage | None,
+        execution_time: float
+    ) -> Answer:
+        """Convert domain reasoning result to Answer value object.
 
-    def _convert_to_answer(self, result: ReasoningResult) -> Answer:
-        """Convert domain result to Answer value object."""
+        Uses domain TokenUsage directly - no dict conversion needed.
+        """
         return Answer(
-            extracted_answer=result.get_answer(),
-            reasoning_trace=result.get_reasoning_trace(),
-            execution_time=result.execution_metadata.get("execution_time", 0.0),
-            token_usage=result.execution_metadata.get("token_usage"),
-            raw_response=str(result.final_answer)
+            extracted_answer=reasoning_result.get_answer(),
+            reasoning_trace=reasoning_result.get_reasoning_trace(),
+            confidence=None,  # TODO: Add confidence extraction from logprobs
+            execution_time=execution_time,
+            token_usage=token_usage,  # Domain TokenUsage object directly
+            raw_response=str(reasoning_result.final_answer),
         )
 ```
 
@@ -418,7 +516,7 @@ class OpenRouterClient:
         """OpenRouter-specific headers for app attribution"""
         headers = {}
         if self.config.app_name:
-            headers["HTTP-Referer"] = self.config.app_url or "https://github.com/your-org/ml-agents-v2"
+            headers["HTTP-Referer"] = self.config.app_url or "https://github.com/thompsonson/ml-agents-v2"
             headers["X-Title"] = self.config.app_name
         return headers
 
@@ -452,21 +550,39 @@ class OpenRouterClient:
         await self.http_client.aclose()
 ```
 
-### Error Mapping
+### Anti-Corruption Layer Error Mapping
 
-OpenRouter normalizes errors and provides specific error codes including 402 for credit balance issues and rate limiting controls.
+The error mapping component protects the domain from external API error variations by translating all external exceptions to domain `FailureReason` objects. This prevents external error types from leaking into domain or application layers.
 
 ```python
 # infrastructure/error_mapping.py
-from domain.value_objects import FailureReason, FailureCategory
+from core.domain.value_objects.failure_reason import FailureReason, FailureCategory
 from openai import APIError, RateLimitError, APITimeoutError
 import structlog
 
 class OpenRouterErrorMapper:
+    """Anti-Corruption Layer for external API error translation.
+
+    Maps all external API errors to domain FailureReason objects,
+    ensuring no external exception types escape the infrastructure boundary.
+    """
+
     @staticmethod
     def map_to_failure_reason(error: Exception) -> FailureReason:
-        """Map OpenRouter/OpenAI errors to domain FailureReason"""
+        """Translate external API errors to domain FailureReason.
 
+        This method acts as an Anti-Corruption Layer for error handling,
+        ensuring domain and application layers never see external API
+        exception types.
+
+        Args:
+            error: Any external API exception
+
+        Returns:
+            FailureReason: Domain representation of the failure
+        """
+
+        # OpenAI/OpenRouter specific error mappings
         if isinstance(error, RateLimitError):
             return FailureReason(
                 category=FailureCategory.RATE_LIMIT_EXCEEDED,
@@ -506,12 +622,23 @@ class OpenRouterErrorMapper:
                     recoverable=False
                 )
 
+        # Generic error fallback - ensures no external exceptions escape
         return FailureReason(
             category=FailureCategory.UNKNOWN,
             description="Unexpected error",
             technical_details=str(error),
             recoverable=False
         )
+
+    @staticmethod
+    def is_recoverable_error(error: Exception) -> bool:
+        """Determine if external error might succeed on retry.
+
+        Uses domain logic to categorize external errors without
+        exposing external error types to calling code.
+        """
+        failure_reason = OpenRouterErrorMapper.map_to_failure_reason(error)
+        return failure_reason.recoverable
 ```
 
 ## Configuration Management
