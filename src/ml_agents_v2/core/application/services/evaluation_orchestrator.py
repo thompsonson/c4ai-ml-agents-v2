@@ -21,6 +21,7 @@ from ...domain.repositories.evaluation_repository import EvaluationRepository
 from ...domain.repositories.preprocessed_benchmark_repository import (
     PreprocessedBenchmarkRepository,
 )
+from ...domain.services.export_service import ExportService
 from ...domain.services.reasoning.reasoning_agent_service import ReasoningAgentService
 from ...domain.value_objects.agent_config import AgentConfig
 
@@ -56,6 +57,7 @@ class EvaluationOrchestrator:
         benchmark_repository: PreprocessedBenchmarkRepository,
         reasoning_infrastructure_service: ReasoningInfrastructureService,
         domain_service_registry: dict[str, ReasoningAgentService],
+        export_service: ExportService,
     ) -> None:
         """Initialize the evaluation orchestrator.
 
@@ -65,12 +67,14 @@ class EvaluationOrchestrator:
             benchmark_repository: Repository for benchmark access
             reasoning_infrastructure_service: Infrastructure service for LLM calls
             domain_service_registry: Registry of domain reasoning services
+            export_service: Service for exporting evaluation results
         """
         self._evaluation_repo = evaluation_repository
         self._question_result_repo = evaluation_question_result_repository
         self._benchmark_repo = benchmark_repository
         self._reasoning_infrastructure = reasoning_infrastructure_service
         self._domain_services = domain_service_registry
+        self._export_service = export_service
         self._logger = structlog.get_logger(__name__)
 
     def create_evaluation(
@@ -861,3 +865,68 @@ class EvaluationOrchestrator:
         else:
             # Fallback to existing pattern for backward compatibility
             return self._evaluation_to_info(evaluation, benchmark)
+
+    def export_evaluation_results(
+        self, evaluation_id: uuid.UUID, export_format: str, output_path: str
+    ) -> None:
+        """Export evaluation results to specified format and location.
+
+        Args:
+            evaluation_id: ID of the evaluation to export
+            export_format: Format for export (currently supports 'csv')
+            output_path: Path where the export file should be written
+
+        Raises:
+            EvaluationNotFoundError: If evaluation doesn't exist
+            InvalidExportDataError: If evaluation has no results to export
+            ExportFormatError: If export_format is not supported
+            ExportFileError: If file cannot be written
+        """
+        self._logger.info(
+            "Exporting evaluation results",
+            extra={
+                "evaluation_id": str(evaluation_id),
+                "format": export_format,
+                "output_path": output_path,
+            },
+        )
+
+        # Validate evaluation exists
+        try:
+            evaluation = self._evaluation_repo.get_by_id(evaluation_id)
+            self._logger.debug(
+                f"Found evaluation {evaluation_id} with status: {evaluation.status}"
+            )
+        except Exception as e:
+            raise EvaluationNotFoundError(
+                f"Evaluation {evaluation_id} not found"
+            ) from e
+
+        # Get question results for this evaluation
+        question_results = self._question_result_repo.get_by_evaluation_id(
+            evaluation_id
+        )
+
+        if not question_results:
+            raise EvaluationNotFoundError(
+                f"No question results found for evaluation {evaluation_id}. "
+                "The evaluation may not have been executed yet."
+            )
+
+        # Delegate to appropriate export service method based on format
+        if export_format.lower() == "csv":
+            self._export_service.export_to_csv(question_results, output_path)
+        else:
+            from ...domain.services.export_exceptions import ExportFormatError
+
+            raise ExportFormatError(export_format, ["csv"])
+
+        self._logger.info(
+            "Successfully exported evaluation results",
+            extra={
+                "evaluation_id": str(evaluation_id),
+                "format": export_format,
+                "output_path": output_path,
+                "question_count": len(question_results),
+            },
+        )

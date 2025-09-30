@@ -15,6 +15,9 @@ from ml_agents_v2.core.application.services.results_analyzer import (
 from ml_agents_v2.core.domain.services.reasoning.reasoning_agent_factory import (
     ReasoningAgentServiceFactory,
 )
+from ml_agents_v2.infrastructure.csv.evaluation_results_csv_writer import (
+    EvaluationResultsCsvWriter,
+)
 from ml_agents_v2.infrastructure.database.repositories.benchmark_repository_impl import (
     BenchmarkRepositoryImpl,
 )
@@ -108,6 +111,11 @@ class Container(containers.DeclarativeContainer):
         openrouter_client=openrouter_client,
     )
 
+    # Export Service
+    export_service = providers.Singleton(
+        EvaluationResultsCsvWriter,
+    )
+
     # Application Services
     evaluation_orchestrator = providers.Factory(
         EvaluationOrchestrator,
@@ -116,6 +124,7 @@ class Container(containers.DeclarativeContainer):
         benchmark_repository=benchmark_repository,
         reasoning_infrastructure_service=reasoning_infrastructure_service,
         domain_service_registry=domain_service_registry,
+        export_service=export_service,
     )
 
     benchmark_processor = providers.Factory(

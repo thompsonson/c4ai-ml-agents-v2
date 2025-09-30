@@ -523,3 +523,82 @@ def show(ctx: click.Context, evaluation_id: str) -> None:
     except Exception as e:
         console.print(f"✗ Error showing evaluation: {str(e)}", style="red")
         ctx.exit(1)
+
+
+@evaluate.command()
+@click.argument("evaluation_id")
+@click.option(
+    "--format",
+    type=click.Choice(["csv"]),
+    default="csv",
+    help="Export format (default: csv)",
+)
+@click.option(
+    "--output",
+    required=True,
+    help="Output file path for the exported data",
+)
+@click.pass_context
+def export(ctx: click.Context, evaluation_id: str, format: str, output: str) -> None:
+    """Export evaluation results to file.
+
+    Export question-level results for the specified evaluation to a file
+    in the requested format. Includes question text, expected/actual answers,
+    correctness, timing, and error information.
+    """
+    try:
+        container = ctx.obj["container"]
+        orchestrator = container.evaluation_orchestrator()
+
+        # Convert string to UUID if needed (same logic as run/show commands)
+        try:
+            eval_uuid = uuid.UUID(evaluation_id)
+        except ValueError:
+            # Try to find by short ID (first 8 characters)
+            all_evaluations = orchestrator.list_evaluations()
+            matching_evaluations = [
+                eval_info
+                for eval_info in all_evaluations
+                if str(eval_info.evaluation_id).startswith(evaluation_id)
+            ]
+
+            if len(matching_evaluations) == 0:
+                console.print(
+                    f"✗ Error: No evaluation found with ID starting with '{evaluation_id}'",
+                    style="red",
+                )
+                ctx.exit(1)
+            elif len(matching_evaluations) > 1:
+                console.print(
+                    f"✗ Error: Multiple evaluations found with ID starting with '{evaluation_id}'. Please use a longer ID.",
+                    style="red",
+                )
+                console.print("Matching evaluations:")
+                for eval_info in matching_evaluations:
+                    console.print(
+                        f"  {str(eval_info.evaluation_id)[:8]} - {eval_info.status}"
+                    )
+                ctx.exit(1)
+            else:
+                eval_uuid = matching_evaluations[0].evaluation_id
+
+        short_id = str(eval_uuid)[:8]
+
+        # Execute export
+        console.print(f"🔄 Exporting evaluation {short_id} to {format.upper()}...")
+
+        orchestrator.export_evaluation_results(
+            evaluation_id=eval_uuid, export_format=format, output_path=output
+        )
+
+        console.print(f"✓ Exported evaluation {short_id} to {output}", style="green")
+        console.print(f"  Format: {format.upper()}")
+        console.print(f"  File: {output}")
+
+    except ValueError as e:
+        error_msg = str(e)
+        console.print(f"✗ Error: {error_msg}", style="red")
+        ctx.exit(1)
+    except Exception as e:
+        console.print(f"✗ Error exporting evaluation: {str(e)}", style="red")
+        ctx.exit(1)

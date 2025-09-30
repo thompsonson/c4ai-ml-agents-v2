@@ -106,12 +106,16 @@ class TestEvaluationOrchestratorShowFix:
         question_result_repo.get_by_evaluation_id.return_value = question_results
 
         # Create orchestrator
+        # Create mock export service
+        mock_export_service = Mock()
+
         orchestrator = EvaluationOrchestrator(
             evaluation_repository=evaluation_repo,
             evaluation_question_result_repository=question_result_repo,
             benchmark_repository=benchmark_repo,
             reasoning_infrastructure_service=reasoning_service,
             domain_service_registry=domain_services,
+            export_service=mock_export_service,
         )
 
         # Act
@@ -227,12 +231,16 @@ class TestEvaluationOrchestratorShowFix:
         benchmark_repo.get_by_id.return_value = benchmark
 
         # Create orchestrator
+        # Create mock export service
+        mock_export_service = Mock()
+
         orchestrator = EvaluationOrchestrator(
             evaluation_repository=evaluation_repo,
             evaluation_question_result_repository=question_result_repo,
             benchmark_repository=benchmark_repo,
             reasoning_infrastructure_service=reasoning_service,
             domain_service_registry=domain_services,
+            export_service=mock_export_service,
         )
 
         # Act
@@ -308,12 +316,16 @@ class TestEvaluationOrchestratorShowFix:
         )  # No question results
 
         # Create orchestrator
+        # Create mock export service
+        mock_export_service = Mock()
+
         orchestrator = EvaluationOrchestrator(
             evaluation_repository=evaluation_repo,
             evaluation_question_result_repository=question_result_repo,
             benchmark_repository=benchmark_repo,
             reasoning_infrastructure_service=reasoning_service,
             domain_service_registry=domain_services,
+            export_service=mock_export_service,
         )
 
         # Act & Assert

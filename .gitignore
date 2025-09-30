@@ -97,3 +97,5 @@ alembic/versions/*.py
 # Temporary files
 *.tmp
 *.temp
+
+*.csv
