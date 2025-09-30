@@ -364,3 +364,162 @@ def list_evaluations(ctx: click.Context, status: str, benchmark: str) -> None:
     except Exception as e:
         console.print(f"✗ Error listing evaluations: {str(e)}", style="red")
         ctx.exit(1)
+
+
+@evaluate.command()
+@click.argument("evaluation_id")
+@click.pass_context
+def show(ctx: click.Context, evaluation_id: str) -> None:
+    """Show detailed evaluation results and information."""
+    try:
+        container = ctx.obj["container"]
+        orchestrator = container.evaluation_orchestrator()
+
+        # Convert string to UUID if needed (same logic as run command)
+        try:
+            eval_uuid = uuid.UUID(evaluation_id)
+        except ValueError:
+            # Try to find by short ID (first 8 characters)
+            all_evaluations = orchestrator.list_evaluations()
+            matching_evaluations = [
+                eval_info
+                for eval_info in all_evaluations
+                if str(eval_info.evaluation_id).startswith(evaluation_id)
+            ]
+
+            if len(matching_evaluations) == 0:
+                console.print(
+                    f"✗ Error: No evaluation found with ID starting with '{evaluation_id}'",
+                    style="red",
+                )
+                ctx.exit(1)
+            elif len(matching_evaluations) > 1:
+                console.print(
+                    f"✗ Error: Multiple evaluations found with ID starting with '{evaluation_id}'. Please use a longer ID.",
+                    style="red",
+                )
+                console.print("Matching evaluations:")
+                for eval_info in matching_evaluations:
+                    console.print(
+                        f"  {str(eval_info.evaluation_id)[:8]} - {eval_info.status}"
+                    )
+                ctx.exit(1)
+            else:
+                eval_uuid = matching_evaluations[0].evaluation_id
+
+        short_id = str(eval_uuid)[:8]
+
+        # Get basic evaluation information
+        evaluation_info = orchestrator.get_evaluation_info(eval_uuid)
+
+        # Create table for detailed view
+        table = Table(title=f"Evaluation Details: {short_id}")
+        table.add_column("Field", style="cyan", width=20)
+        table.add_column("Value", style="white")
+
+        # Add basic information
+        table.add_row("Status", evaluation_info.status)
+        table.add_row("Benchmark", evaluation_info.benchmark_name)
+
+        # Format agent type display
+        agent_display = {
+            "chain_of_thought": "Chain of Thought",
+            "none": "Direct prompting",
+        }.get(evaluation_info.agent_type, evaluation_info.agent_type)
+        table.add_row("Agent Type", agent_display)
+        table.add_row("Model", evaluation_info.model_name)
+
+        # Add detailed results based on status
+        if evaluation_info.status == "completed":
+            try:
+                # Get detailed results for completed evaluations
+                results = orchestrator.get_evaluation_results(eval_uuid)
+                table.add_row("Total Questions", str(results.total_questions))
+                table.add_row("Correct Answers", str(results.correct_answers))
+                table.add_row("Accuracy", f"{results.accuracy:.2f}%")
+                table.add_row(
+                    "Avg Execution Time", f"{results.average_time_per_question:.2f}s"
+                )
+                table.add_row("Error Count", str(results.error_count))
+
+                # Format execution time
+                if results.execution_time_minutes >= 1:
+                    time_text = f"{results.execution_time_minutes:.1f}m"
+                else:
+                    time_text = f"{results.execution_time_minutes * 60:.1f}s"
+                table.add_row("Total Time", time_text)
+
+            except Exception:
+                # Fallback if detailed results not available
+                table.add_row("Total Questions", "-")
+                table.add_row("Correct Answers", "-")
+                table.add_row("Accuracy", "-")
+                table.add_row("Avg Execution Time", "-")
+                table.add_row("Error Count", "-")
+                table.add_row("Total Time", "-")
+
+        elif evaluation_info.status in ["interrupted", "running"]:
+            try:
+                # Get progress for interrupted/running evaluations
+                progress_info = orchestrator.get_evaluation_progress(eval_uuid)
+                table.add_row(
+                    "Progress",
+                    f"{progress_info.current_question}/{progress_info.total_questions}",
+                )
+                table.add_row("Correct Answers", str(progress_info.successful_answers))
+                if progress_info.current_question > 0:
+                    table.add_row(
+                        "Current Accuracy", f"{progress_info.success_rate:.2f}%"
+                    )
+                else:
+                    table.add_row("Current Accuracy", "-")
+                table.add_row("Failed Questions", str(progress_info.failed_questions))
+
+            except Exception:
+                # Fallback if progress not available
+                table.add_row("Progress", "-")
+                table.add_row("Correct Answers", "-")
+                table.add_row("Current Accuracy", "-")
+                table.add_row("Failed Questions", "-")
+        else:
+            # Pending or failed evaluations
+            table.add_row("Total Questions", "-")
+            table.add_row("Correct Answers", "-")
+            table.add_row("Accuracy", "-")
+            table.add_row("Progress", "-")
+
+        # Add timestamps
+        created_at = evaluation_info.created_at
+        time_diff = (datetime.now() - created_at).total_seconds()
+        if time_diff < 3600:  # Less than 1 hour
+            created_text = f"{int(time_diff / 60)} minutes ago"
+        elif time_diff < 86400:  # Less than 1 day
+            created_text = f"{int(time_diff / 3600)} hours ago"
+        else:
+            created_text = f"{int(time_diff / 86400)} days ago"
+
+        table.add_row("Created", created_text)
+
+        if evaluation_info.completed_at:
+            completed_diff = (
+                datetime.now() - evaluation_info.completed_at
+            ).total_seconds()
+            if completed_diff < 3600:  # Less than 1 hour
+                completed_text = f"{int(completed_diff / 60)} minutes ago"
+            elif completed_diff < 86400:  # Less than 1 day
+                completed_text = f"{int(completed_diff / 3600)} hours ago"
+            else:
+                completed_text = f"{int(completed_diff / 86400)} days ago"
+            table.add_row("Completed", completed_text)
+        else:
+            table.add_row("Completed", "-")
+
+        console.print(table)
+
+    except ValueError as e:
+        error_msg = str(e)
+        console.print(f"✗ Error: {error_msg}", style="red")
+        ctx.exit(1)
+    except Exception as e:
+        console.print(f"✗ Error showing evaluation: {str(e)}", style="red")
+        ctx.exit(1)

@@ -312,7 +312,7 @@ class EvaluationOrchestrator:
                 f"Evaluation {evaluation_id} not found"
             ) from e
 
-        if evaluation.status != "completed" or evaluation.results is None:
+        if evaluation.status != "completed":
             raise InvalidEvaluationStateError(
                 f"Evaluation not completed (status: {evaluation.status})"
             )
@@ -328,18 +328,33 @@ class EvaluationOrchestrator:
         else:
             execution_time = 0.0
 
+        # Get results - either from stored results or compute from question results
+        if evaluation.results is not None:
+            # Use stored results
+            results = evaluation.results
+        else:
+            # Compute results from individual question results (Phase 8 pattern)
+            question_results = self._question_result_repo.get_by_evaluation_id(
+                evaluation.evaluation_id
+            )
+            if not question_results:
+                raise InvalidEvaluationStateError(
+                    f"Evaluation {evaluation.evaluation_id} has no question results"
+                )
+            results = EvaluationResults.from_question_results(question_results)
+
         return EvaluationSummary(
             evaluation_id=evaluation.evaluation_id,
             agent_type=evaluation.agent_config.agent_type,
             model_name=evaluation.agent_config.model_name,
             benchmark_name=benchmark.name,
             status=evaluation.status,
-            total_questions=evaluation.results.total_questions,
-            correct_answers=evaluation.results.correct_answers,
-            accuracy=evaluation.results.accuracy,
+            total_questions=results.total_questions,
+            correct_answers=results.correct_answers,
+            accuracy=results.accuracy,
             execution_time_minutes=execution_time,
-            average_time_per_question=evaluation.results.average_execution_time,
-            error_count=evaluation.results.error_count,
+            average_time_per_question=results.average_execution_time,
+            error_count=results.error_count,
             created_at=evaluation.created_at,
             completed_at=evaluation.completed_at,
         )
