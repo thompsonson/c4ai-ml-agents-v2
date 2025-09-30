@@ -19,14 +19,14 @@ from ml_agents_v2.core.domain.repositories.preprocessed_benchmark_repository imp
 from ml_agents_v2.infrastructure.database.models.benchmark import BenchmarkModel
 from ml_agents_v2.infrastructure.database.session_manager import DatabaseSessionManager
 
-# Benchmark registry mapping user-friendly names to database stored names
-# Updated to reflect actual stored names in database rather than file names
+# Benchmark registry mapping user-friendly names to filename patterns
+# Updated to match infrastructure requirements documentation and test expectations
 BENCHMARK_REGISTRY = {
-    "GPQA": "GPQA",
-    "FOLIO": "FOLIO",
-    "BBEH": "BBEH",
-    "MATH3": "MATH3",
-    "LeetCode_Python_Easy": "LeetCode_Python_Easy",
+    "GPQA": "BENCHMARK-01-GPQA.csv",
+    "FOLIO": "BENCHMARK-05-FOLIO.csv",
+    "BBEH": "BENCHMARK-06-BBEH.csv",
+    "MATH3": "BENCHMARK-07-MATH3.csv",
+    "LeetCode_Python_Easy": "BENCHMARK-08-LeetCode_Python_Easy.csv",
 }
 
 
@@ -96,10 +96,12 @@ class BenchmarkRepositoryImpl(PreprocessedBenchmarkRepository):
     def get_by_name(self, name: str) -> PreprocessedBenchmark:
         """Retrieve benchmark by name.
 
-        Maps short name to filename using BENCHMARK_REGISTRY, fallback to name if not found.
+        First tries direct lookup by name, then falls back to registry mapping.
+        This supports both user-friendly names stored directly in the database
+        and registry-mapped CSV filenames.
 
         Args:
-            name: Name of benchmark to retrieve (short name or full filename)
+            name: Name of benchmark to retrieve (user-friendly name or CSV filename)
 
         Returns:
             Domain benchmark entity
@@ -108,19 +110,29 @@ class BenchmarkRepositoryImpl(PreprocessedBenchmarkRepository):
             EntityNotFoundError: If benchmark not found
             RepositoryError: If database operation fails
         """
-        # Map short name to filename, fallback to name if not in registry
-        filename = BENCHMARK_REGISTRY.get(name, name)
-
         try:
             with self.session_manager.get_session() as session:
-                stmt = select(BenchmarkModel).where(BenchmarkModel.name == filename)
+                # First, try direct lookup by the provided name
+                stmt = select(BenchmarkModel).where(BenchmarkModel.name == name)
                 result = session.execute(stmt)
                 benchmark_model = result.scalar_one_or_none()
 
-                if benchmark_model is None:
-                    raise EntityNotFoundError("Benchmark", name)
+                if benchmark_model is not None:
+                    return benchmark_model.to_domain()
 
-                return benchmark_model.to_domain()
+                # If direct lookup fails, try registry mapping
+                filename = BENCHMARK_REGISTRY.get(name)
+                if filename is not None and filename != name:
+                    stmt = select(BenchmarkModel).where(BenchmarkModel.name == filename)
+                    result = session.execute(stmt)
+                    benchmark_model = result.scalar_one_or_none()
+
+                    if benchmark_model is not None:
+                        return benchmark_model.to_domain()
+
+                # If both lookups fail, raise EntityNotFoundError
+                raise EntityNotFoundError("Benchmark", name)
+
         except EntityNotFoundError:
             raise
         except SQLAlchemyError as e:

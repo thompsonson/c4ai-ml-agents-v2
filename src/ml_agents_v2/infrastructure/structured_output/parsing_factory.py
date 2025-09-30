@@ -1,21 +1,27 @@
-"""Output parsing factory with dual parsing strategy support."""
+"""Output parsing factory working with domain LLMClient interface.
+
+This module provides parsers that work with the LLMClient domain interface.
+All type normalization is handled by the Anti-Corruption Layer (OpenRouterClient).
+Parsers receive clean domain types and focus purely on structured output parsing.
+"""
 
 from typing import Any
 
-import instructor  # type: ignore
-import structured_logprobs  # type: ignore
-from openai import AsyncOpenAI
-
+from ...core.domain.services.llm_client import LLMClient
 from ...core.domain.value_objects.agent_config import AgentConfig
 from .model_capabilities import ModelCapabilitiesRegistry
 from .models import BaseReasoningOutput, ChainOfThoughtOutput, DirectAnswerOutput
 
 
 class StructuredLogProbsParser:
-    """Use structured-logprobs for models supporting logprobs."""
+    """Use structured-logprobs for models supporting logprobs.
 
-    def __init__(self, openrouter_client: AsyncOpenAI):
-        self.openrouter_client = openrouter_client
+    Works with LLMClient domain interface - receives clean domain types
+    from Anti-Corruption Layer. No type normalization needed.
+    """
+
+    def __init__(self, llm_client: LLMClient):
+        self.llm_client = llm_client
 
     def _pydantic_to_json_schema(
         self, model: type[BaseReasoningOutput]
@@ -35,81 +41,93 @@ class StructuredLogProbsParser:
     async def parse(
         self, model: type[BaseReasoningOutput], prompt: str, config: AgentConfig
     ) -> dict[str, Any]:
-        """Parse using OpenAI structured output with logprobs processing."""
+        """Parse using OpenAI structured output with logprobs processing.
+
+        Receives clean domain types from LLMClient. No normalization needed.
+        """
         json_schema = self._pydantic_to_json_schema(model)
 
-        # Make structured output request with logprobs enabled
-        response = await self.openrouter_client.chat.completions.create(
+        # Call through domain interface - gets clean ParsedResponse
+        parsed_response = await self.llm_client.chat_completion(
             model=config.model_name,
             messages=[{"role": "user", "content": prompt}],
-            response_format=json_schema,  # type: ignore
+            response_format=json_schema,
             logprobs=True,
             **config.model_parameters,
         )
 
-        # Process response with structured-logprobs for confidence scoring
-        try:
-            enhanced_response = structured_logprobs.add_logprobs(response)
-            confidence_scores = enhanced_response.log_probs
-        except (AttributeError, Exception):
-            # Fallback if logprobs processing fails
-            confidence_scores = getattr(response.choices[0], "logprobs", None)
-
-        # Parse the structured JSON response
-        parsed_json = response.choices[0].message.parsed
-        if parsed_json:
-            parsed_data = model.model_validate(parsed_json)
+        # Validate structured data if present
+        if parsed_response.has_structured_data():
+            parsed_data = model.model_validate(parsed_response.structured_data)
+            confidence_scores = None  # TODO: Extract from ParsedResponse if needed
         else:
-            # Fallback to content parsing if parsed field is not available
-            content = response.choices[0].message.content
-
-            parsed_data = model.model_validate_json(content)
+            # Fallback to content parsing
+            parsed_data = model.model_validate_json(parsed_response.content)
+            confidence_scores = None
 
         return {
             "parsed_data": parsed_data,
             "confidence_scores": confidence_scores,
-            "token_usage": response.usage,
         }
 
 
 class InstructorParser:
-    """Use instructor for models without logprobs support."""
+    """Use instructor for models without logprobs support.
 
-    def __init__(self, openrouter_client: AsyncOpenAI):
-        self.client = instructor.from_openai(openrouter_client)
+    Works with LLMClient domain interface - receives clean domain types
+    from Anti-Corruption Layer. No type normalization needed.
+    """
+
+    def __init__(self, llm_client: LLMClient):
+        self.llm_client = llm_client
 
     async def parse(
         self, model: type[BaseReasoningOutput], prompt: str, config: AgentConfig
     ) -> dict[str, Any]:
-        """Parse using instructor with Pydantic model directly."""
-        response = await self.client.chat.completions.create(
+        """Parse using instructor approach through domain interface.
+
+        Note: This is a simplified implementation. Full instructor integration
+        would require additional adapter layer to use instructor with LLMClient.
+        """
+        # Call through domain interface - gets clean ParsedResponse
+        parsed_response = await self.llm_client.chat_completion(
             model=config.model_name,
             messages=[{"role": "user", "content": prompt}],
-            response_model=model,
             **config.model_parameters,
         )
 
+        # Parse content as JSON and validate with Pydantic model
+        try:
+            parsed_data = model.model_validate_json(parsed_response.content)
+        except Exception:
+            # Fallback: create model with just the content
+            # This assumes the model has an 'answer' field
+            parsed_data = model(answer=parsed_response.content)
+
         return {
-            "parsed_data": response,
+            "parsed_data": parsed_data,
             "confidence_scores": None,  # Not available with instructor
-            "token_usage": getattr(response, "_raw_response", {}).get("usage"),
         }
 
 
 class OutputParserFactory:
-    """Factory for creating appropriate parser based on model capabilities."""
+    """Factory for creating appropriate parser based on model capabilities.
 
-    def __init__(self, openrouter_client: AsyncOpenAI):
-        self.openrouter_client = openrouter_client
+    Works with LLMClient domain interface. Parsers receive clean domain types
+    from Anti-Corruption Layer.
+    """
+
+    def __init__(self, llm_client: LLMClient):
+        self.llm_client = llm_client
 
     def create_parser(
         self, model_name: str
     ) -> StructuredLogProbsParser | InstructorParser:
         """Create parser based on model capabilities."""
         if ModelCapabilitiesRegistry.supports_logprobs(model_name):
-            return StructuredLogProbsParser(self.openrouter_client)
+            return StructuredLogProbsParser(self.llm_client)
         else:
-            return InstructorParser(self.openrouter_client)
+            return InstructorParser(self.llm_client)
 
     def get_output_model(self, agent_type: str) -> type[BaseReasoningOutput]:
         """Map domain agent type to infrastructure output model."""

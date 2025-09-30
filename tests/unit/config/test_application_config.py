@@ -44,7 +44,7 @@ class TestApplicationConfig:
         """Test that ApplicationConfig validates required fields."""
         with patch.dict(os.environ, {}, clear=True):
             with pytest.raises(ValidationError, match="Field required"):
-                ApplicationConfig()
+                ApplicationConfig(_env_file=None)
 
     def test_config_loads_agent_defaults(self):
         """Test that ApplicationConfig loads agent default parameters."""

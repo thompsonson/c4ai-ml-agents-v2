@@ -1,7 +1,6 @@
 """Dependency injection container for ML Agents v2."""
 
 from dependency_injector import containers, providers
-from openai import AsyncOpenAI
 
 from ml_agents_v2.config.application_config import get_config
 from ml_agents_v2.core.application.services.benchmark_processor import (
@@ -18,6 +17,9 @@ from ml_agents_v2.core.domain.services.reasoning.reasoning_agent_factory import 
 )
 from ml_agents_v2.infrastructure.database.repositories.benchmark_repository_impl import (
     BenchmarkRepositoryImpl,
+)
+from ml_agents_v2.infrastructure.database.repositories.evaluation_question_result_repository_impl import (
+    EvaluationQuestionResultRepositoryImpl,
 )
 from ml_agents_v2.infrastructure.database.repositories.evaluation_repository_impl import (
     EvaluationRepositoryImpl,
@@ -62,14 +64,6 @@ class Container(containers.DeclarativeContainer):
         max_retries=config.provided.openrouter_max_retries,
     )
 
-    # Async OpenAI client for Phase 6 structured output parsing
-    async_openrouter_client = providers.Singleton(
-        AsyncOpenAI,
-        api_key=config.provided.openrouter_api_key,
-        base_url=config.provided.openrouter_base_url,
-        timeout=config.provided.openrouter_timeout,
-    )
-
     # Infrastructure Layer - Repository Implementations
     benchmark_repository = providers.Singleton(
         BenchmarkRepositoryImpl,
@@ -78,6 +72,11 @@ class Container(containers.DeclarativeContainer):
 
     evaluation_repository = providers.Singleton(
         EvaluationRepositoryImpl,
+        session_manager=database_session_manager,
+    )
+
+    evaluation_question_result_repository = providers.Singleton(
+        EvaluationQuestionResultRepositoryImpl,
         session_manager=database_session_manager,
     )
 
@@ -99,7 +98,7 @@ class Container(containers.DeclarativeContainer):
 
     reasoning_infrastructure_service = providers.Singleton(
         ReasoningInfrastructureService,
-        openrouter_client=async_openrouter_client,
+        llm_client=openrouter_client,  # OpenRouterClient implements LLMClient
         error_mapper=openrouter_error_mapper,
     )
 
@@ -113,6 +112,7 @@ class Container(containers.DeclarativeContainer):
     evaluation_orchestrator = providers.Factory(
         EvaluationOrchestrator,
         evaluation_repository=evaluation_repository,
+        evaluation_question_result_repository=evaluation_question_result_repository,
         benchmark_repository=benchmark_repository,
         reasoning_infrastructure_service=reasoning_infrastructure_service,
         domain_service_registry=domain_service_registry,

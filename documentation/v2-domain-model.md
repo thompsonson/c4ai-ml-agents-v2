@@ -83,7 +83,6 @@ pending → running → completed
 - `actual_answer`: Agent's extracted answer
 - `is_correct`: Correctness evaluation result
 - `execution_time`: Processing duration in seconds
-- `token_usage`: Token consumption metrics
 - `reasoning_trace`: Step-by-step reasoning documentation
 - `error_message`: Failure description if processing failed
 - `processed_at`: When question was completed
@@ -99,7 +98,6 @@ pending → running → completed
 **Methods**:
 
 - `is_successful()`: Check if question was processed without errors
-- `get_token_count()`: Extract total tokens from usage metrics
 - `matches_expected()`: Verify answer correctness
 
 ---
@@ -275,7 +273,6 @@ This is a value object because configurations are reusable and shareable across 
 - `extracted_answer`: Clean, final answer
 - `reasoning_trace`: Step-by-step reasoning process
 - `execution_time`: Time taken to generate answer
-- `token_usage`: LLM token consumption metrics
 - `raw_response`: Full model response text
 
 **Immutable**: Yes
@@ -313,7 +310,6 @@ def from_question_results(cls, question_results: List[EvaluationQuestionResult])
         correct_answers=correct_answers,
         accuracy=correct_answers / total_questions if total_questions > 0 else 0.0,
         average_execution_time=sum(q.execution_time for q in question_results) / total_questions,
-        total_tokens=sum(q.get_token_count() for q in question_results),
         error_count=sum(1 for q in question_results if q.error_message),
         detailed_results=[q.to_question_result() for q in question_results],
         summary_statistics={}
@@ -382,65 +378,6 @@ Understanding why evaluations fail is crucial for researchers to improve their a
 
 ---
 
-#### TokenUsage
-
-**Purpose**: Standardized representation of LLM token consumption metrics
-
-Token usage tracking is a core domain concept essential for cost analysis, performance monitoring, and research reproducibility. This value object provides a consistent interface regardless of underlying LLM provider variations.
-
-**Attributes**:
-
-- `prompt_tokens`: Number of tokens in the input prompt
-- `completion_tokens`: Number of tokens in the model's response
-- `total_tokens`: Total tokens consumed (prompt + completion)
-
-**Business Rules**:
-
-- All token counts must be non-negative
-- `total_tokens` must equal `prompt_tokens + completion_tokens`
-- Immutable once created (represents completed API call)
-
-**Methods**:
-
-```python
-@dataclass(frozen=True)
-class TokenUsage:
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    total_tokens: int = 0
-
-    def __post_init__(self) -> None:
-        """Validate token counts and business rules."""
-        if self.prompt_tokens < 0 or self.completion_tokens < 0 or self.total_tokens < 0:
-            raise ValueError("Token counts cannot be negative")
-        if self.total_tokens != self.prompt_tokens + self.completion_tokens:
-            raise ValueError("total_tokens must equal prompt_tokens + completion_tokens")
-
-    def to_dict(self) -> dict[str, int]:
-        """Serialize for storage and reporting."""
-        return {
-            "prompt_tokens": self.prompt_tokens,
-            "completion_tokens": self.completion_tokens,
-            "total_tokens": self.total_tokens,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any] | None) -> 'TokenUsage | None':
-        """Factory method handling various input formats from infrastructure layer."""
-        if data is None:
-            return None
-        return cls(
-            prompt_tokens=data.get("prompt_tokens", 0),
-            completion_tokens=data.get("completion_tokens", 0),
-            total_tokens=data.get("total_tokens", 0),
-        )
-```
-
-**Immutable**: Yes
-
-**Domain Rationale**: Token usage is a fundamental unit of measurement in LLM research, requiring consistent representation across different providers and models.
-
----
 
 #### ParsedResponse
 
@@ -452,13 +389,11 @@ Provides a clean boundary between external API response formats and domain proce
 
 - `content`: Raw text content from the LLM response
 - `structured_data`: Parsed structured output (when using structured output modes)
-- `token_usage`: Token consumption metrics (TokenUsage value object)
 
 **Business Rules**:
 
 - Content must not be empty for successful responses
 - Structured data is optional (None for text-only responses)
-- Token usage may be None if provider doesn't report metrics
 - Immutable once created
 
 **Methods**:
@@ -468,7 +403,6 @@ Provides a clean boundary between external API response formats and domain proce
 class ParsedResponse:
     content: str
     structured_data: dict | None = None
-    token_usage: TokenUsage | None = None
 
     def __post_init__(self) -> None:
         """Validate response content."""
@@ -478,12 +412,6 @@ class ParsedResponse:
     def has_structured_data(self) -> bool:
         """Check if response includes parsed structured output."""
         return self.structured_data is not None
-
-    def get_token_count(self) -> int:
-        """Extract total tokens, handling None gracefully."""
-        if self.token_usage is None:
-            return 0
-        return self.token_usage.total_tokens
 
     def get_content_length(self) -> int:
         """Get character count of response content."""

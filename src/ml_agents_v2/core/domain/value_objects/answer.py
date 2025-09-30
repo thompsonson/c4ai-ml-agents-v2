@@ -8,31 +8,24 @@ from .reasoning_trace import ReasoningTrace
 
 
 @dataclass(frozen=True)
-class TokenUsage:
-    """LLM token consumption metrics.
+class ParsedResponse:
+    """Response from LLM client with standardized format.
 
-    Tracks the number of tokens used in the request and response
-    for cost analysis and performance monitoring.
+    This value object represents the normalized response from any LLM provider,
+    eliminating external API type variations at the infrastructure boundary.
     """
 
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
+    content: str
+    structured_data: dict | None = None
 
     def __post_init__(self) -> None:
-        """Validate TokenUsage attributes after construction."""
-        if (
-            self.prompt_tokens < 0
-            or self.completion_tokens < 0
-            or self.total_tokens < 0
-        ):
-            raise ValueError("Token counts cannot be negative")
+        """Validate ParsedResponse attributes after construction."""
+        if not self.content or not self.content.strip():
+            raise ValueError("Response content cannot be empty")
 
-        if self.total_tokens != self.prompt_tokens + self.completion_tokens:
-            raise ValueError(
-                f"total_tokens ({self.total_tokens}) must equal "
-                f"prompt_tokens + completion_tokens ({self.prompt_tokens + self.completion_tokens})"
-            )
+    def has_structured_data(self) -> bool:
+        """Check if response includes parsed structured output."""
+        return self.structured_data is not None
 
 
 @dataclass(frozen=True)
@@ -47,7 +40,6 @@ class Answer:
     reasoning_trace: ReasoningTrace
     confidence: float | None
     execution_time: float
-    token_usage: TokenUsage
     raw_response: str
 
     def __post_init__(self) -> None:

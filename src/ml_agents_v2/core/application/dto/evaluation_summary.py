@@ -24,7 +24,6 @@ class EvaluationSummary:
     correct_answers: int
     accuracy: float
     execution_time_minutes: float
-    total_tokens: int | None
     average_time_per_question: float
     error_count: int
     created_at: datetime
@@ -48,10 +47,3 @@ class EvaluationSummary:
             f"Time: {self.execution_time_minutes:.1f}m, "
             f"Errors: {self.error_count}"
         )
-
-    @property
-    def token_usage_display(self) -> str:
-        """Get formatted token usage."""
-        if self.total_tokens is None:
-            return "Token usage not available"
-        return f"{self.total_tokens:,} tokens"

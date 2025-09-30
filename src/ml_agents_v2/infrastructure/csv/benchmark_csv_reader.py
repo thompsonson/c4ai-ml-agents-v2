@@ -46,14 +46,14 @@ class BenchmarkCsvReader:
         try:
             questions = []
 
-            with open(csv_path, 'r', encoding='utf-8') as file:
+            with open(csv_path, encoding="utf-8") as file:
                 reader = csv.DictReader(file)
 
                 # Validate required columns
                 if not reader.fieldnames:
                     raise ValueError("CSV file appears to be empty or invalid")
 
-                required_columns = {'INPUT', 'OUTPUT'}
+                required_columns = {"INPUT", "OUTPUT"}
                 available_columns = set(reader.fieldnames)
 
                 if not required_columns.issubset(available_columns):
@@ -67,15 +67,19 @@ class BenchmarkCsvReader:
                 for row_num, row in enumerate(reader, start=1):
                     try:
                         # Validate row data
-                        input_text = row.get('INPUT', '').strip()
-                        output_text = row.get('OUTPUT', '').strip()
+                        input_text = row.get("INPUT", "").strip()
+                        output_text = row.get("OUTPUT", "").strip()
 
                         if not input_text:
-                            self._logger.warning(f"Row {row_num}: Empty INPUT field, skipping")
+                            self._logger.warning(
+                                f"Row {row_num}: Empty INPUT field, skipping"
+                            )
                             continue
 
                         if not output_text:
-                            self._logger.warning(f"Row {row_num}: Empty OUTPUT field, skipping")
+                            self._logger.warning(
+                                f"Row {row_num}: Empty OUTPUT field, skipping"
+                            )
                             continue
 
                         # Create Question object with generated ID
@@ -83,7 +87,7 @@ class BenchmarkCsvReader:
                             id=str(row_num),  # Sequential ID based on CSV row
                             text=input_text,
                             expected_answer=output_text,
-                            metadata=self._extract_metadata(row, row_num)
+                            metadata=self._extract_metadata(row, row_num),
                         )
 
                         questions.append(question)
@@ -102,9 +106,9 @@ class BenchmarkCsvReader:
 
             return questions
 
-        except (IOError, OSError) as e:
+        except OSError as e:
             self._logger.error(f"Failed to read CSV file {file_path}: {e}")
-            raise IOError(f"Cannot read CSV file: {e}") from e
+            raise OSError(f"Cannot read CSV file: {e}") from e
 
         except csv.Error as e:
             self._logger.error(f"CSV parsing error in {file_path}: {e}")
@@ -124,11 +128,11 @@ class BenchmarkCsvReader:
 
         # Add any additional columns as metadata
         for key, value in row.items():
-            if key not in {'INPUT', 'OUTPUT'} and value and value.strip():
+            if key not in {"INPUT", "OUTPUT"} and value and value.strip():
                 metadata[key.lower()] = value.strip()
 
         # Add row number for reference
-        metadata['csv_row_number'] = row_num
+        metadata["csv_row_number"] = row_num
 
         return metadata
 
@@ -160,14 +164,14 @@ class BenchmarkCsvReader:
                 return False, errors
 
             # Check CSV structure
-            with open(csv_path, 'r', encoding='utf-8') as file:
+            with open(csv_path, encoding="utf-8") as file:
                 reader = csv.DictReader(file)
 
                 if not reader.fieldnames:
                     errors.append("CSV file has no headers")
                     return False, errors
 
-                required_columns = {'INPUT', 'OUTPUT'}
+                required_columns = {"INPUT", "OUTPUT"}
                 available_columns = set(reader.fieldnames)
 
                 if not required_columns.issubset(available_columns):

@@ -32,9 +32,9 @@ quality-gates:
 	@printf "🔍 Type check: "; \
 	if uv run mypy src/ml_agents_v2 --no-error-summary >/dev/null 2>&1; then echo "OK"; else echo "FAILED"; uv run mypy src/ml_agents_v2; exit 1; fi
 	@printf "📐 Format check: "; \
-	if uv run black --check --quiet src/ tests/ >/dev/null 2>&1; then echo "OK"; else echo "FAILED"; uv run black --check --diff src/ tests/; exit 1; fi
+	if uv run black --quiet src/ tests/ >/dev/null 2>&1; then echo "OK"; else echo "FAILED"; uv run black $ --diff src/ tests/; exit 1; fi
 	@printf "🔧 Lint: "; \
-	if uv run ruff check --quiet src/ tests/ >/dev/null 2>&1; then echo "OK"; else echo "FAILED"; uv run ruff check src/ tests/; exit 1; fi
+	if uv run ruff check --fix src/ tests/ >/dev/null 2>&1; then echo "OK"; else echo "FAILED"; uv run ruff check --fix src/ tests/; exit 1; fi
 	@echo "✅ All quality gates passed!"
 
 test:

@@ -356,6 +356,50 @@ class TestBenchmarkRepositoryImpl:
         assert len(fresh_names) == original_length
         assert "TEST_MODIFICATION" not in fresh_names
 
+    def test_get_by_name_with_user_friendly_name_stored_in_database(self, repository):
+        """Test retrieving benchmark by user-friendly name when that's what's stored.
+
+        This test covers the real-world scenario where benchmarks are stored in the database
+        with user-friendly names (e.g., 'GPQA') rather than CSV filenames
+        (e.g., 'BENCHMARK-01-GPQA.csv'). The get_by_name method should find these benchmarks
+        when searched using the user-friendly name.
+
+        This test currently fails because get_by_name() maps 'GPQA' to 'BENCHMARK-01-GPQA.csv'
+        and searches for that mapped name, but the benchmark is stored as 'GPQA'.
+        """
+        from ml_agents_v2.core.domain.value_objects.question import Question
+
+        # Create and save a benchmark with user-friendly name (as it exists in real database)
+        question = Question(
+            id="gpqa-test-q1",
+            text="What is the speed of light in vacuum?",
+            expected_answer="299,792,458 m/s",
+            metadata={"difficulty": "medium"},
+        )
+
+        benchmark = PreprocessedBenchmark(
+            benchmark_id=uuid.uuid4(),
+            name="GPQA",  # Save with user-friendly name, not CSV filename
+            description="Graduate-level physics, chemistry, and biology questions",
+            questions=[question],
+            metadata={"source": "GPQA dataset", "format": "user_friendly"},
+            created_at=datetime.now(),
+            question_count=1,
+            format_version="1.0",
+        )
+        repository.save(benchmark)
+
+        # Attempt to retrieve using the same user-friendly name
+        # This should work but currently fails because get_by_name() maps
+        # "GPQA" -> "BENCHMARK-01-GPQA.csv" and searches for the mapped name
+        retrieved = repository.get_by_name("GPQA")
+
+        assert retrieved.benchmark_id == benchmark.benchmark_id
+        assert retrieved.name == "GPQA"
+        assert retrieved.description == benchmark.description
+        assert len(retrieved.questions) == 1
+        assert retrieved.questions[0].text == question.text
+
     def test_registry_name_mapping_integration(self, repository):
         """Test end-to-end integration of registry name mapping."""
 

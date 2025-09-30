@@ -141,7 +141,6 @@ class TestEvaluationResults:
             correct_answers=1,
             accuracy=50.0,
             average_execution_time=2.5,
-            total_tokens=300,
             error_count=0,
             detailed_results=detailed_results,
             summary_statistics=summary_statistics,
@@ -151,7 +150,6 @@ class TestEvaluationResults:
         assert results.correct_answers == 1
         assert results.accuracy == 50.0
         assert results.average_execution_time == 2.5
-        assert results.total_tokens == 300
         assert results.error_count == 0
         assert len(results.detailed_results) == 2
         assert results.summary_statistics == summary_statistics
@@ -173,7 +171,6 @@ class TestEvaluationResults:
             correct_answers=1,
             accuracy=100.0,
             average_execution_time=1.0,
-            total_tokens=100,
             error_count=0,
             detailed_results=detailed_results,
             summary_statistics={},
@@ -183,7 +180,6 @@ class TestEvaluationResults:
             correct_answers=1,
             accuracy=100.0,
             average_execution_time=1.0,
-            total_tokens=100,
             error_count=0,
             detailed_results=detailed_results,
             summary_statistics={},
@@ -209,7 +205,6 @@ class TestEvaluationResults:
                 correct_answers=1,
                 accuracy=100.0,
                 average_execution_time=1.0,
-                total_tokens=100,
                 error_count=0,
                 detailed_results=detailed_results,
                 summary_statistics={},
@@ -236,7 +231,6 @@ class TestEvaluationResults:
                 correct_answers=1,
                 accuracy=150.0,
                 average_execution_time=1.0,
-                total_tokens=100,
                 error_count=0,
                 detailed_results=detailed_results,
                 summary_statistics={},
@@ -263,7 +257,6 @@ class TestEvaluationResults:
                 correct_answers=2,
                 accuracy=200.0,
                 average_execution_time=1.0,
-                total_tokens=100,
                 error_count=0,
                 detailed_results=detailed_results,
                 summary_statistics={},
@@ -294,7 +287,6 @@ class TestEvaluationResults:
                 correct_answers=1,
                 accuracy=50.0,
                 average_execution_time=1.0,
-                total_tokens=100,
                 error_count=0,
                 detailed_results=detailed_results,
                 summary_statistics={},
@@ -331,7 +323,6 @@ class TestEvaluationResults:
             correct_answers=1,
             accuracy=50.0,
             average_execution_time=1.0,
-            total_tokens=100,
             error_count=0,
             detailed_results=detailed_results,
             summary_statistics={},
@@ -347,7 +338,6 @@ class TestEvaluationResults:
             correct_answers=0,
             accuracy=0.0,
             average_execution_time=0.0,
-            total_tokens=0,
             error_count=0,
             detailed_results=[],
             summary_statistics={},
@@ -380,7 +370,6 @@ class TestEvaluationResults:
             correct_answers=1,
             accuracy=50.0,
             average_execution_time=2.5,
-            total_tokens=300,
             error_count=0,
             detailed_results=detailed_results,
             summary_statistics={},
@@ -391,7 +380,6 @@ class TestEvaluationResults:
         assert "accuracy" in summary
         assert "total_questions" in summary
         assert "average_execution_time" in summary
-        assert "total_tokens" in summary
 
     def test_evaluation_results_export_detailed_csv(self) -> None:
         """Test export_detailed_csv returns CSV format string."""
@@ -417,7 +405,6 @@ class TestEvaluationResults:
             correct_answers=1,
             accuracy=50.0,
             average_execution_time=2.5,
-            total_tokens=300,
             error_count=0,
             detailed_results=detailed_results,
             summary_statistics={},
@@ -447,7 +434,6 @@ class TestEvaluationResults:
             correct_answers=1,
             accuracy=100.0,
             average_execution_time=1.0,
-            total_tokens=100,
             error_count=0,
             detailed_results=detailed_results,
             summary_statistics={},

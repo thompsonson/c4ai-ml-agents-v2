@@ -8,11 +8,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from ....infrastructure.csv.benchmark_csv_reader import BenchmarkCsvReader
 from ...domain.entities.preprocessed_benchmark import PreprocessedBenchmark
 from ...domain.repositories.preprocessed_benchmark_repository import (
     PreprocessedBenchmarkRepository,
 )
-from ....infrastructure.csv.benchmark_csv_reader import BenchmarkCsvReader
 from ..dto.benchmark_info import BenchmarkInfo
 from ..dto.validation_result import ValidationResult
 from .exceptions import BenchmarkNotFoundError
@@ -322,10 +322,16 @@ class BenchmarkProcessor:
                 raise BenchmarkNotFoundError(f"CSV file not found: {csv_file_path}")
 
             # Validate CSV format before processing
-            is_valid, validation_errors = self._csv_reader.validate_csv_format(csv_file_path)
+            is_valid, validation_errors = self._csv_reader.validate_csv_format(
+                csv_file_path
+            )
             if not is_valid:
                 from .exceptions import ValidationError
-                raise ValidationError(f"Invalid CSV format: {'; '.join(validation_errors)}")
+
+                raise ValidationError(
+                    f"Invalid CSV format: {'; '.join(validation_errors)}",
+                    validation_errors,
+                )
 
             # Generate benchmark name from filename if not provided
             if benchmark_name is None:
@@ -339,14 +345,22 @@ class BenchmarkProcessor:
             name_validation = self.validate_benchmark_name(benchmark_name)
             if not name_validation.is_valid:
                 from .exceptions import ValidationError
-                raise ValidationError(f"Benchmark name validation failed: {'; '.join(name_validation.errors)}")
+
+                raise ValidationError(
+                    f"Benchmark name validation failed: {'; '.join(name_validation.errors)}",
+                    name_validation.errors,
+                )
 
             # Read questions from CSV
             questions = self._csv_reader.read_questions_from_csv(csv_file_path)
 
             if not questions:
                 from .exceptions import ValidationError
-                raise ValidationError("No valid questions found in CSV file")
+
+                raise ValidationError(
+                    "No valid questions found in CSV file",
+                    ["No valid questions found in CSV file"],
+                )
 
             # Create PreprocessedBenchmark entity
             benchmark = PreprocessedBenchmark(
@@ -392,9 +406,13 @@ class BenchmarkProcessor:
             # Map specific exception types
             if "validation" in str(e).lower() or "invalid" in str(e).lower():
                 from .exceptions import ValidationError
-                raise ValidationError(f"Benchmark import validation failed: {e}") from e
+
+                raise ValidationError(
+                    f"Benchmark import validation failed: {e}", [str(e)]
+                ) from e
 
             from .exceptions import ExternalServiceError
+
             raise ExternalServiceError(
                 f"Failed to import benchmark from CSV: {e}",
                 service_name="benchmark_processor",

@@ -73,7 +73,6 @@ class EvaluationModel(Base):
                     "correct_answers": evaluation.results.correct_answers,
                     "accuracy": evaluation.results.accuracy,
                     "average_execution_time": evaluation.results.average_execution_time,
-                    "total_tokens": evaluation.results.total_tokens,
                     "error_count": evaluation.results.error_count,
                     "detailed_results": [
                         {
@@ -154,7 +153,6 @@ class EvaluationModel(Base):
                 correct_answers=results_data["correct_answers"],
                 accuracy=results_data["accuracy"],
                 average_execution_time=results_data["average_execution_time"],
-                total_tokens=results_data["total_tokens"],
                 error_count=results_data["error_count"],
                 detailed_results=detailed_results,
                 summary_statistics=results_data["summary_statistics"],

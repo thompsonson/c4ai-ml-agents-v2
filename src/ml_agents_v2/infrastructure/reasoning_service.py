@@ -3,8 +3,7 @@
 import time
 from typing import Any
 
-from openai import AsyncOpenAI
-
+from ..core.domain.services.llm_client import LLMClient
 from ..core.domain.services.reasoning.reasoning_agent_service import (
     ReasoningAgentService,
 )
@@ -19,12 +18,10 @@ from .structured_output.parsing_factory import OutputParserFactory
 class ReasoningInfrastructureService:
     """Infrastructure service executing domain reasoning strategies."""
 
-    def __init__(
-        self, openrouter_client: AsyncOpenAI, error_mapper: OpenRouterErrorMapper
-    ):
-        self.openrouter_client = openrouter_client
+    def __init__(self, llm_client: LLMClient, error_mapper: OpenRouterErrorMapper):
+        self.llm_client = llm_client
         self.error_mapper = error_mapper
-        self.parser_factory = OutputParserFactory(openrouter_client)
+        self.parser_factory = OutputParserFactory(llm_client)
 
     async def execute_reasoning(
         self,
@@ -51,7 +48,6 @@ class ReasoningInfrastructureService:
             # Domain: Process structured data into domain result
             processing_metadata = {
                 "execution_time": execution_time,
-                "token_usage": parse_result.get("token_usage"),
             }
 
             # Convert pydantic output to string for domain processing
@@ -84,6 +80,5 @@ class ReasoningInfrastructureService:
             reasoning_trace=reasoning_result.get_reasoning_trace(),
             confidence=None,  # Not available with current parsing strategy
             execution_time=execution_time,
-            token_usage=reasoning_result.execution_metadata.get("token_usage"),
             raw_response=str(reasoning_result.final_answer),
         )

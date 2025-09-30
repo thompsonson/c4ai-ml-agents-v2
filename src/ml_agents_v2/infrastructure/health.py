@@ -1,5 +1,6 @@
 """Health check service for infrastructure validation."""
 
+import asyncio
 from typing import Any
 
 from pydantic import BaseModel
@@ -90,8 +91,8 @@ class HealthChecker:
             Dictionary with OpenRouter health status and details
         """
         try:
-            # Use the health_check method from the OpenRouter client
-            response = self.openrouter_client.health_check()
+            # Use the health_check method from the OpenRouter client (now async)
+            response = asyncio.run(self.openrouter_client.health_check())
 
             # Extract useful information from the response
             status_info = {

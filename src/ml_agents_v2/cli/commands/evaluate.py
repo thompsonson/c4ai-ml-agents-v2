@@ -3,6 +3,7 @@
 import asyncio
 import uuid
 from datetime import datetime
+from typing import Any
 
 import click
 from rich.console import Console
@@ -105,9 +106,7 @@ def create(
         short_id = str(evaluation)[:8]
         agent_display = "Chain of Thought" if agent == "cot" else "Direct prompting"
 
-        console.print(
-            f"✓ Created evaluation {short_id} (pending)", style="green"
-        )
+        console.print(f"✓ Created evaluation {short_id} (pending)", style="green")
         console.print(f"  Agent: {agent_display}")
         console.print(f"  Model: {model}")
         console.print(f"  Benchmark: {benchmark}")
@@ -148,50 +147,100 @@ def run(ctx: click.Context, evaluation_id: str) -> None:
             # Get all evaluations and find one that starts with the provided ID
             all_evaluations = orchestrator.list_evaluations()
             matching_evaluations = [
-                eval_info for eval_info in all_evaluations
+                eval_info
+                for eval_info in all_evaluations
                 if str(eval_info.evaluation_id).startswith(evaluation_id)
             ]
 
             if len(matching_evaluations) == 0:
-                console.print(f"✗ Error: No evaluation found with ID starting with '{evaluation_id}'", style="red")
+                console.print(
+                    f"✗ Error: No evaluation found with ID starting with '{evaluation_id}'",
+                    style="red",
+                )
                 ctx.exit(1)
             elif len(matching_evaluations) > 1:
-                console.print(f"✗ Error: Multiple evaluations found with ID starting with '{evaluation_id}'. Please use a longer ID.", style="red")
+                console.print(
+                    f"✗ Error: Multiple evaluations found with ID starting with '{evaluation_id}'. Please use a longer ID.",
+                    style="red",
+                )
                 console.print("Matching evaluations:")
                 for eval_info in matching_evaluations:
-                    console.print(f"  {str(eval_info.evaluation_id)[:8]} - {eval_info.status}")
+                    console.print(
+                        f"  {str(eval_info.evaluation_id)[:8]} - {eval_info.status}"
+                    )
                 ctx.exit(1)
             else:
                 eval_uuid = matching_evaluations[0].evaluation_id
 
         short_id = str(eval_uuid)[:8]
 
-        console.print(f"Running evaluation {short_id}...")
+        # Check evaluation status for resume capability (Phase 8)
+        evaluation_info = orchestrator.get_evaluation_info(eval_uuid)
 
-        # Execute evaluation with real progress tracking
+        if evaluation_info.status == "interrupted":
+            console.print(
+                f"📋 Resuming interrupted evaluation {short_id}...", style="yellow"
+            )
+            # Get current progress
+            progress_info = orchestrator.get_evaluation_progress(eval_uuid)
+            console.print(
+                f"   Already completed: {progress_info.current_question}/{progress_info.total_questions} questions"
+            )
+            console.print(f"   Success rate so far: {progress_info.success_rate:.1f}%")
+        elif evaluation_info.status == "completed":
+            console.print(f"✓ Evaluation {short_id} already completed", style="green")
+            return
+        elif evaluation_info.status == "failed":
+            console.print(f"✗ Evaluation {short_id} previously failed", style="red")
+            return
+        else:
+            console.print(f"🚀 Starting evaluation {short_id}...")
+
+        # Execute evaluation with enhanced progress tracking (Phase 8)
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TextColumn("({task.completed}/{task.total})"),
+            TextColumn("Success: {task.fields[success_rate]:.1f}%"),
             TimeElapsedColumn(),
             console=console,
         ) as progress:
 
-            task = progress.add_task("Executing evaluation...", total=100)
+            initial_progress = orchestrator.get_evaluation_progress(eval_uuid)
+            total_questions = initial_progress.total_questions
 
-            # Real progress callback
-            def progress_callback(progress_info):
-                if progress_info.total_questions > 0:
-                    completed_percentage = (progress_info.current_question / progress_info.total_questions) * 100
-                    progress.update(task, completed=completed_percentage)
-                    progress.update(task, description=f"Processing question {progress_info.current_question}/{progress_info.total_questions}")
+            task = progress.add_task(
+                "Executing evaluation...",
+                total=total_questions,
+                completed=initial_progress.current_question,
+                success_rate=initial_progress.success_rate,
+            )
 
-            # Execute the evaluation with real async call
-            asyncio.run(orchestrator.execute_evaluation(
-                evaluation_id=eval_uuid,
-                progress_callback=progress_callback
-            ))
+            # Enhanced progress callback (Phase 8)
+            def progress_callback(progress_info: Any) -> None:
+                progress.update(
+                    task,
+                    completed=progress_info.current_question,
+                    description=f"Processing questions ({progress_info.successful_answers} successful, {progress_info.failed_questions} failed)",
+                    success_rate=progress_info.success_rate,
+                )
+
+            try:
+                # Execute the evaluation with interruption handling
+                asyncio.run(
+                    orchestrator.execute_evaluation(
+                        evaluation_id=eval_uuid, progress_callback=progress_callback
+                    )
+                )
+            except KeyboardInterrupt:
+                console.print("\n⏸️  Evaluation interrupted by user", style="yellow")
+                console.print(
+                    "   Progress has been saved. Use the same command to resume.",
+                    style="dim",
+                )
+                ctx.exit(0)
 
         console.print("✓ Completed evaluation", style="green")
 
@@ -227,13 +276,14 @@ def list_evaluations(ctx: click.Context, status: str, benchmark: str) -> None:
             console.print("No evaluations found.", style="yellow")
             return
 
-        # Create table
+        # Create table with Phase 8 progress column
         table = Table(title="Evaluations")
         table.add_column("ID", style="cyan", no_wrap=True)
         table.add_column("Status", justify="center")
         table.add_column("Agent", style="dim")
         table.add_column("Model", style="dim")
         table.add_column("Benchmark", style="bold")
+        table.add_column("Progress", justify="center", style="blue")
         table.add_column("Accuracy", justify="right", style="green")
         table.add_column("Created", style="dim")
 
@@ -256,9 +306,37 @@ def list_evaluations(ctx: click.Context, status: str, benchmark: str) -> None:
                 evaluation.agent_type, evaluation.agent_type
             )
 
-            # Format accuracy
-            accuracy = evaluation.accuracy
-            accuracy_text = f"{accuracy:.1f}%" if accuracy is not None else "-"
+            # Phase 8: Enhanced progress and accuracy display
+            progress_text = "-"
+            accuracy_text = "-"
+
+            try:
+                if evaluation.status in ["completed", "interrupted", "running"]:
+                    # Get computed results from question results for any evaluation with progress
+                    if evaluation.status == "completed":
+                        # For completed evaluations, get full results
+                        results = orchestrator.get_evaluation_results(
+                            evaluation.evaluation_id
+                        )
+                        accuracy_text = f"{results.accuracy:.1f}%"
+                        progress_text = (
+                            f"{results.total_questions}/{results.total_questions}"
+                        )
+                    else:
+                        # For interrupted/running evaluations, get current progress
+                        progress_info = orchestrator.get_evaluation_progress(
+                            evaluation.evaluation_id
+                        )
+                        progress_text = f"{progress_info.current_question}/{progress_info.total_questions}"
+                        if progress_info.current_question > 0:
+                            accuracy_text = f"{progress_info.success_rate:.1f}%"
+                elif evaluation.accuracy is not None:
+                    # Fallback to stored accuracy for backwards compatibility
+                    accuracy_text = f"{evaluation.accuracy:.1f}%"
+            except Exception:
+                # If we can't get progress/results, use stored values
+                if evaluation.accuracy is not None:
+                    accuracy_text = f"{evaluation.accuracy:.1f}%"
 
             # Format created time (relative)
             created_at = evaluation.created_at
@@ -276,6 +354,7 @@ def list_evaluations(ctx: click.Context, status: str, benchmark: str) -> None:
                 agent_display,
                 evaluation.model_name,
                 evaluation.benchmark_name,
+                progress_text,
                 accuracy_text,
                 time_text,
             )

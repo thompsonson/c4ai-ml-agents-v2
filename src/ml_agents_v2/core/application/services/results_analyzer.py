@@ -99,7 +99,6 @@ class ResultsAnalyzer:
                 correct_answers=evaluation.results.correct_answers,
                 accuracy=evaluation.results.accuracy,
                 execution_time_minutes=execution_time_minutes,
-                total_tokens=evaluation.results.total_tokens,
                 average_time_per_question=evaluation.results.average_execution_time,
                 error_count=evaluation.results.error_count,
                 created_at=evaluation.created_at,
@@ -330,7 +329,6 @@ class ResultsAnalyzer:
                         "benchmark_name": summary.benchmark_name,
                         "accuracy": summary.accuracy,
                         "execution_time_minutes": summary.execution_time_minutes,
-                        "total_tokens": summary.total_tokens,
                         "error_count": summary.error_count,
                     }
                     for summary in summaries
@@ -340,7 +338,6 @@ class ResultsAnalyzer:
                 "average_accuracy": sum(s.accuracy for s in summaries) / len(summaries),
                 "fastest_execution": min(s.execution_time_minutes for s in summaries),
                 "slowest_execution": max(s.execution_time_minutes for s in summaries),
-                "total_tokens_used": sum(s.total_tokens or 0 for s in summaries),
                 "comparison_generated_at": "now",  # Would use datetime in real implementation
             }
 
@@ -380,7 +377,6 @@ class ResultsAnalyzer:
                 "correct_answers",
                 "accuracy",
                 "execution_time_minutes",
-                "total_tokens",
                 "error_count",
                 "created_at",
                 "completed_at",
@@ -405,7 +401,6 @@ class ResultsAnalyzer:
                 evaluation.results.correct_answers,
                 evaluation.results.accuracy,
                 execution_time,
-                evaluation.results.total_tokens,
                 evaluation.results.error_count,
                 evaluation.created_at.isoformat(),
                 evaluation.completed_at.isoformat() if evaluation.completed_at else "",
@@ -442,7 +437,6 @@ class ResultsAnalyzer:
                 "accuracy": evaluation.results.accuracy,
                 "execution_time_minutes": execution_time,
                 "average_time_per_question": evaluation.results.average_execution_time,
-                "total_tokens": evaluation.results.total_tokens,
                 "error_count": evaluation.results.error_count,
             },
             "timestamps": {

@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
-import logging
 import uuid
 from collections.abc import Callable
-from dataclasses import replace
 from datetime import datetime
 
 # Type import to avoid circular dependencies
 from typing import TYPE_CHECKING
 
+import structlog
+
 from ...domain.entities.evaluation import Evaluation
+from ...domain.entities.evaluation_question_result import EvaluationQuestionResult
 from ...domain.entities.preprocessed_benchmark import PreprocessedBenchmark
+from ...domain.repositories.evaluation_question_result_repository import (
+    EvaluationQuestionResultRepository,
+)
 from ...domain.repositories.evaluation_repository import EvaluationRepository
 from ...domain.repositories.preprocessed_benchmark_repository import (
     PreprocessedBenchmarkRepository,
@@ -48,6 +52,7 @@ class EvaluationOrchestrator:
     def __init__(
         self,
         evaluation_repository: EvaluationRepository,
+        evaluation_question_result_repository: EvaluationQuestionResultRepository,
         benchmark_repository: PreprocessedBenchmarkRepository,
         reasoning_infrastructure_service: ReasoningInfrastructureService,
         domain_service_registry: dict[str, ReasoningAgentService],
@@ -56,15 +61,17 @@ class EvaluationOrchestrator:
 
         Args:
             evaluation_repository: Repository for evaluation persistence
+            evaluation_question_result_repository: Repository for individual question results
             benchmark_repository: Repository for benchmark access
             reasoning_infrastructure_service: Infrastructure service for LLM calls
             domain_service_registry: Registry of domain reasoning services
         """
         self._evaluation_repo = evaluation_repository
+        self._question_result_repo = evaluation_question_result_repository
         self._benchmark_repo = benchmark_repository
         self._reasoning_infrastructure = reasoning_infrastructure_service
         self._domain_services = domain_service_registry
-        self._logger = logging.getLogger(__name__)
+        self._logger = structlog.get_logger(__name__)
 
     def create_evaluation(
         self,
@@ -188,41 +195,54 @@ class EvaluationOrchestrator:
             raise EvaluationExecutionError(f"Failed to load benchmark: {e}") from e
 
         # Transition to running state
-        started_at = datetime.now()
-        running_evaluation = replace(
-            evaluation,
-            status="running",
-            started_at=started_at,
-        )
+        running_evaluation = evaluation.start_execution()
         self._evaluation_repo.update(running_evaluation)
 
         try:
-            # Execute questions
-            results = await self._execute_questions(
+            # Execute questions with incremental persistence (Phase 8 pattern)
+            await self._execute_questions_incrementally(
                 running_evaluation, benchmark, progress_callback
             )
 
-            # Complete evaluation
-            completed_at = datetime.now()
-            completed_evaluation = replace(
-                running_evaluation,
-                status="completed",
-                completed_at=completed_at,
-                results=results,
-            )
+            # Complete evaluation (no results parameter - computed from questions)
+            completed_evaluation = running_evaluation.complete()
             self._evaluation_repo.update(completed_evaluation)
+
+            # Compute final results for logging from saved question results
+            question_results = self._question_result_repo.get_by_evaluation_id(
+                evaluation_id
+            )
+            computed_results = EvaluationResults.from_question_results(question_results)
 
             self._logger.info(
                 "Evaluation completed successfully",
                 extra={
                     "evaluation_id": str(evaluation_id),
-                    "accuracy": results.accuracy,
-                    "duration_minutes": (
-                        results.average_execution_time * results.total_questions
-                    )
-                    / 60,
+                    "accuracy": computed_results.accuracy,
+                    "total_questions": computed_results.total_questions,
+                    "correct_answers": computed_results.correct_answers,
                 },
             )
+
+        except KeyboardInterrupt:
+            # Handle graceful interruption (Ctrl+C)
+            self._logger.info(
+                "Evaluation interrupted by user",
+                extra={"evaluation_id": str(evaluation_id)},
+            )
+
+            interrupted_evaluation = running_evaluation.interrupt()
+            self._evaluation_repo.update(interrupted_evaluation)
+
+            # Log partial progress
+            question_results = self._question_result_repo.get_by_evaluation_id(
+                evaluation_id
+            )
+            self._logger.info(
+                f"Evaluation interrupted: {len(question_results)}/{len(benchmark.questions)} questions completed"
+            )
+
+            raise  # Re-raise to propagate interruption
 
         except Exception as e:
             # Handle execution failure
@@ -239,12 +259,7 @@ class EvaluationOrchestrator:
                 recoverable=False,
             )
 
-            failed_evaluation = replace(
-                running_evaluation,
-                status="failed",
-                completed_at=datetime.now(),
-                failure_reason=failure_reason,
-            )
+            failed_evaluation = running_evaluation.fail_with_reason(failure_reason)
             self._evaluation_repo.update(failed_evaluation)
 
             raise EvaluationExecutionError(f"Execution failed: {e}") from e
@@ -323,7 +338,6 @@ class EvaluationOrchestrator:
             correct_answers=evaluation.results.correct_answers,
             accuracy=evaluation.results.accuracy,
             execution_time_minutes=execution_time,
-            total_tokens=evaluation.results.total_tokens,
             average_time_per_question=evaluation.results.average_execution_time,
             error_count=evaluation.results.error_count,
             created_at=evaluation.created_at,
@@ -405,7 +419,6 @@ class EvaluationOrchestrator:
         correct_count = 0
         error_count = 0
         total_execution_time = 0.0
-        total_tokens = 0
 
         for i, question in enumerate(questions):
             try:
@@ -425,8 +438,6 @@ class EvaluationOrchestrator:
 
                     # Accumulate metrics
                     total_execution_time += result.execution_time
-                    if result.token_usage:
-                        total_tokens += result.token_usage.total_tokens
 
                     results.append(
                         {
@@ -501,9 +512,6 @@ class EvaluationOrchestrator:
         # Create summary statistics
         summary_stats = {
             "total_runtime_minutes": total_execution_time / 60,
-            "average_tokens_per_question": (
-                total_tokens / total_questions if total_questions > 0 else 0
-            ),
             "success_rate": accuracy,
             "error_rate": error_count / total_questions if total_questions > 0 else 0,
         }
@@ -513,11 +521,149 @@ class EvaluationOrchestrator:
             correct_answers=correct_count,
             accuracy=accuracy,
             average_execution_time=avg_execution_time,
-            total_tokens=total_tokens,
             error_count=error_count,
             detailed_results=question_results,
             summary_statistics=summary_stats,
         )
+
+    async def _execute_questions_incrementally(
+        self,
+        evaluation: Evaluation,
+        benchmark: PreprocessedBenchmark,
+        progress_callback: Callable[[ProgressInfo], None] | None,
+    ) -> None:
+        """Execute questions with incremental persistence (Phase 8 pattern).
+
+        Each question result is saved immediately upon completion, enabling
+        graceful interruption and resume capability.
+
+        Args:
+            evaluation: The evaluation being executed
+            benchmark: The benchmark to process
+            progress_callback: Optional progress callback
+        """
+        # Get domain service for the agent type
+        domain_service = self._domain_services[evaluation.agent_config.agent_type]
+
+        questions = benchmark.get_questions()
+        total_questions = len(questions)
+
+        for _i, question in enumerate(questions):
+            # Check if already completed (for resume capability)
+            if self._question_result_repo.exists(evaluation.evaluation_id, question.id):
+                self._logger.debug(f"Skipping already completed question {question.id}")
+                continue
+
+            try:
+                from datetime import datetime as dt
+
+                start_time = dt.now()
+
+                # Execute reasoning using infrastructure service
+                result = await self._reasoning_infrastructure.execute_reasoning(
+                    domain_service, question, evaluation.agent_config
+                )
+
+                execution_time = (dt.now() - start_time).total_seconds()
+
+                if isinstance(result, Answer):
+                    # Check if answer is correct
+                    is_correct = (
+                        result.extracted_answer.strip().lower()
+                        == question.expected_answer.strip().lower()
+                    )
+
+                    # Create successful question result
+                    question_result = EvaluationQuestionResult.create_successful(
+                        evaluation_id=evaluation.evaluation_id,
+                        question_id=question.id,
+                        question_text=question.text,
+                        expected_answer=question.expected_answer,
+                        actual_answer=result.extracted_answer,
+                        is_correct=is_correct,
+                        execution_time=execution_time,
+                        reasoning_trace=result.reasoning_trace,
+                    )
+
+                else:  # FailureReason
+                    # Log failure with technical details for debugging
+                    self._logger.warning(
+                        "Question processing failed",
+                        question_id=question.id,
+                        error_category=result.category,
+                        error_description=result.description,
+                        technical_details=result.technical_details,
+                        recoverable=result.recoverable,
+                    )
+
+                    # Create failed question result
+                    question_result = EvaluationQuestionResult.create_failed(
+                        evaluation_id=evaluation.evaluation_id,
+                        question_id=question.id,
+                        question_text=question.text,
+                        expected_answer=question.expected_answer,
+                        error_message=result.description,
+                        execution_time=execution_time,
+                        technical_details=result.technical_details,
+                    )
+
+                # Save immediately (incremental persistence)
+                self._question_result_repo.save(question_result)
+
+                # Update progress using real saved data
+                if progress_callback:
+                    domain_progress = self._question_result_repo.get_progress(
+                        evaluation.evaluation_id, total_questions
+                    )
+                    # Convert to application DTO
+                    # Parse latest_processed_at if it's a string, fallback to created_at
+                    from datetime import datetime
+
+                    from ..dto.progress_info import ProgressInfo
+
+                    last_updated = evaluation.created_at
+                    if domain_progress.latest_processed_at:
+                        try:
+                            last_updated = datetime.fromisoformat(
+                                domain_progress.latest_processed_at
+                            )
+                        except ValueError:
+                            last_updated = evaluation.created_at
+
+                    progress_info = ProgressInfo(
+                        evaluation_id=domain_progress.evaluation_id,
+                        current_question=domain_progress.completed_questions,
+                        total_questions=domain_progress.total_questions,
+                        successful_answers=domain_progress.successful_questions,
+                        failed_questions=domain_progress.failed_questions,
+                        started_at=evaluation.started_at or evaluation.created_at,
+                        last_updated=last_updated,
+                    )
+                    progress_callback(progress_info)
+
+            except Exception as e:
+                # Handle unexpected errors during question processing
+                self._logger.error(
+                    "Question execution failed",
+                    extra={
+                        "question_id": question.id,
+                        "error": str(e),
+                        "technical_details": f"{type(e).__name__}: {str(e)}",
+                    },
+                )
+
+                # Save failed question result
+                execution_time = (dt.now() - start_time).total_seconds()
+                failed_question_result = EvaluationQuestionResult.create_failed(
+                    evaluation_id=evaluation.evaluation_id,
+                    question_id=question.id,
+                    question_text=question.text,
+                    expected_answer=question.expected_answer,
+                    error_message=f"Unexpected error: {str(e)}",
+                    execution_time=execution_time,
+                    technical_details=f"{type(e).__name__}: {str(e)}",
+                )
+                self._question_result_repo.save(failed_question_result)
 
     def _validate_agent_config(self, agent_config: AgentConfig) -> ValidationResult:
         """Validate agent configuration.
@@ -588,3 +734,115 @@ class EvaluationOrchestrator:
             total_questions=total_questions,
             correct_answers=correct_answers,
         )
+
+    def get_evaluation_progress(self, evaluation_id: uuid.UUID) -> ProgressInfo:
+        """Get current progress for an evaluation.
+
+        Args:
+            evaluation_id: ID of the evaluation
+
+        Returns:
+            Progress information computed from saved question results
+
+        Raises:
+            EvaluationNotFoundError: If evaluation doesn't exist
+        """
+        # Verify evaluation exists and get benchmark info
+        try:
+            evaluation = self._evaluation_repo.get_by_id(evaluation_id)
+            benchmark = self._benchmark_repo.get_by_id(
+                evaluation.preprocessed_benchmark_id
+            )
+        except Exception as e:
+            raise EvaluationNotFoundError(
+                f"Evaluation {evaluation_id} not found"
+            ) from e
+
+        # Get progress from repository and convert to application DTO
+        domain_progress = self._question_result_repo.get_progress(
+            evaluation_id, len(benchmark.questions)
+        )
+
+        # Convert domain ProgressInfo to application ProgressInfo
+        from datetime import datetime
+
+        from ..dto.progress_info import ProgressInfo
+
+        # Parse latest_processed_at if it's a string, fallback to created_at
+        last_updated = evaluation.created_at
+        if domain_progress.latest_processed_at:
+            try:
+                last_updated = datetime.fromisoformat(
+                    domain_progress.latest_processed_at
+                )
+            except ValueError:
+                last_updated = evaluation.created_at
+
+        return ProgressInfo(
+            evaluation_id=domain_progress.evaluation_id,
+            current_question=domain_progress.completed_questions,
+            total_questions=domain_progress.total_questions,
+            successful_answers=domain_progress.successful_questions,
+            failed_questions=domain_progress.failed_questions,
+            started_at=evaluation.started_at or evaluation.created_at,
+            last_updated=last_updated,
+        )
+
+    def get_evaluation_info(self, evaluation_id: uuid.UUID) -> EvaluationInfo:
+        """Get evaluation information for a single evaluation.
+
+        Phase 8 pattern: For evaluations with question results, compute accuracy
+        and question counts from saved question records rather than stored results.
+
+        Args:
+            evaluation_id: ID of the evaluation
+
+        Returns:
+            Evaluation information DTO
+
+        Raises:
+            EvaluationNotFoundError: If evaluation doesn't exist
+        """
+        try:
+            evaluation = self._evaluation_repo.get_by_id(evaluation_id)
+            benchmark = self._benchmark_repo.get_by_id(
+                evaluation.preprocessed_benchmark_id
+            )
+        except Exception as e:
+            from ...domain.repositories.exceptions import EntityNotFoundError
+
+            if isinstance(e, EntityNotFoundError):
+                raise EvaluationNotFoundError(
+                    f"Evaluation {evaluation_id} not found"
+                ) from e
+            else:
+                raise EvaluationNotFoundError(
+                    f"Failed to retrieve evaluation {evaluation_id}: {e}"
+                ) from e
+
+        # Phase 8: For evaluations with question results, compute from saved data
+        # Check if we have question results (Phase 8 pattern)
+        question_results = self._question_result_repo.get_by_evaluation_id(
+            evaluation_id
+        )
+
+        if question_results:
+            # Use Phase 8 pattern: compute from individual question results
+            computed_results = EvaluationResults.from_question_results(question_results)
+
+            # Create updated evaluation info with computed values
+            return EvaluationInfo(
+                evaluation_id=evaluation.evaluation_id,
+                agent_type=evaluation.agent_config.agent_type,
+                model_name=evaluation.agent_config.model_name,
+                benchmark_name=benchmark.name,
+                status=evaluation.status,
+                accuracy=computed_results.accuracy,
+                created_at=evaluation.created_at,
+                completed_at=evaluation.completed_at,
+                total_questions=computed_results.total_questions,
+                correct_answers=computed_results.correct_answers,
+            )
+        else:
+            # Fallback to existing pattern for backward compatibility
+            return self._evaluation_to_info(evaluation, benchmark)

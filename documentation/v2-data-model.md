@@ -39,7 +39,6 @@ EvaluationQuestionResult {
     actual_answer: str                     # Agent's extracted answer
     is_correct: bool                       # Correctness evaluation
     execution_time: float                  # Seconds taken to process
-    token_usage_json: str                  # TokenUsage object as JSON
     reasoning_trace_json: str              # ReasoningTrace object as JSON
     error_message: str | None              # If question processing failed
     processed_at: datetime                 # When question was completed
@@ -107,7 +106,6 @@ EvaluationResults {
     correct_answers: int                   # Computed from question results
     accuracy: float                        # Computed field
     average_execution_time: float          # Computed from question results
-    total_tokens: int                      # Computed from question results
     error_count: int                       # Computed from question results
     detailed_results: List[QuestionResult] # Loaded from question results table
     summary_statistics: Dict[str, Any]     # Additional computed metrics
@@ -127,7 +125,6 @@ def from_database(cls, evaluation_id: UUID, question_repo: QuestionResultReposit
         correct_answers=sum(1 for q in question_results if q.is_correct),
         accuracy=correct_answers / total_questions if total_questions > 0 else 0.0,
         average_execution_time=sum(q.execution_time for q in question_results) / total_questions,
-        total_tokens=sum(q.get_token_count() for q in question_results),
         error_count=sum(1 for q in question_results if q.error_message),
         detailed_results=question_results,
         summary_statistics={}
@@ -217,7 +214,6 @@ CREATE TABLE evaluation_question_results (
     actual_answer TEXT NOT NULL,
     is_correct BOOLEAN NOT NULL,
     execution_time FLOAT NOT NULL,
-    token_usage_json TEXT,
     reasoning_trace_json TEXT,
     error_message TEXT,
     processed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -275,9 +271,6 @@ ON evaluations(json_extract(failure_reason_json, '$.category'));
 CREATE INDEX idx_evaluations_agent_type
 ON evaluations(json_extract(agent_config_json, '$.agent_type'));
 
--- NEW: Index token usage for analytics
-CREATE INDEX idx_question_results_token_usage
-ON evaluation_question_results(json_extract(token_usage_json, '$.total_tokens'));
 ```
 
 ## Data Size Estimates

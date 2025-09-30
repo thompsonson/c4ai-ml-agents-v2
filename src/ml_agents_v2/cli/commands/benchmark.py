@@ -1,5 +1,7 @@
 """Benchmark command implementation."""
 
+from typing import Any
+
 import click
 from rich.console import Console
 from rich.panel import Panel
@@ -56,7 +58,9 @@ def list_benchmarks(ctx: click.Context) -> None:
 @click.option("--name", help="Benchmark name (defaults to filename)")
 @click.option("--description", help="Benchmark description")
 @click.pass_context
-def import_benchmark(ctx: click.Context, csv_path: str, name: str, description: str) -> None:
+def import_benchmark(
+    ctx: click.Context, csv_path: str, name: str, description: str
+) -> None:
     """Import benchmark from CSV file with INPUT,OUTPUT columns."""
     try:
         container = ctx.obj["container"]
@@ -66,15 +70,13 @@ def import_benchmark(ctx: click.Context, csv_path: str, name: str, description: 
         console.print(f"📥 Importing benchmark from {csv_path}...", style="blue")
 
         benchmark_info = benchmark_processor.import_benchmark_from_csv(
-            csv_file_path=csv_path,
-            benchmark_name=name,
-            description=description
+            csv_file_path=csv_path, benchmark_name=name, description=description
         )
 
         console.print(
             f"✅ Successfully imported benchmark '{benchmark_info.name}' "
             f"with {benchmark_info.question_count} questions",
-            style="green"
+            style="green",
         )
 
         # Display summary
@@ -160,7 +162,7 @@ def _display_verbose_benchmark_list(benchmarks: list[PreprocessedBenchmark]) -> 
     console.print(table)
 
 
-def _display_benchmark_details(benchmark) -> None:
+def _display_benchmark_details(benchmark: Any) -> None:
     """Display detailed information about a specific benchmark (BenchmarkInfo DTO)."""
     # Main information panel
     info_content = f"""
@@ -181,4 +183,6 @@ Statistics:
 
     # For BenchmarkInfo, we don't have access to full metadata or questions
     # This is expected - BenchmarkInfo is a summary DTO
-    console.print("[dim]💡 Use 'ml-agents evaluate create' to run evaluations with this benchmark[/dim]")
+    console.print(
+        "[dim]💡 Use 'ml-agents evaluate create' to run evaluations with this benchmark[/dim]"
+    )

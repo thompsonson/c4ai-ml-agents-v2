@@ -11,7 +11,7 @@ from ml_agents_v2.core.domain.entities.preprocessed_benchmark import (
     PreprocessedBenchmark,
 )
 from ml_agents_v2.core.domain.value_objects.agent_config import AgentConfig
-from ml_agents_v2.core.domain.value_objects.answer import Answer, TokenUsage
+from ml_agents_v2.core.domain.value_objects.answer import Answer
 from ml_agents_v2.core.domain.value_objects.evaluation_results import EvaluationResults
 from ml_agents_v2.core.domain.value_objects.question import Question
 from ml_agents_v2.core.domain.value_objects.reasoning_trace import ReasoningTrace
@@ -106,7 +106,6 @@ def sample_evaluation_results():
         correct_answers=2,
         accuracy=100.0,
         average_execution_time=1.5,
-        total_tokens=150,
         error_count=0,
         detailed_results=detailed_results,
         summary_statistics={},
@@ -126,7 +125,6 @@ def sample_answer():
         ),
         execution_time=1.2,
         confidence=0.95,
-        token_usage=TokenUsage(prompt_tokens=50, completion_tokens=25, total_tokens=75),
     )
 
 

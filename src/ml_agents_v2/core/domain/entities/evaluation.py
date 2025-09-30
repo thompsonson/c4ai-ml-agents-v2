@@ -5,10 +5,17 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from ..value_objects.agent_config import AgentConfig
 from ..value_objects.evaluation_results import EvaluationResults
 from ..value_objects.failure_reason import FailureReason
+
+if TYPE_CHECKING:
+    from ...application.dto.progress_info import ProgressInfo
+    from ..repositories.evaluation_question_result_repository import (
+        EvaluationQuestionResultRepository,
+    )
 
 
 @dataclass(frozen=True)
@@ -39,9 +46,8 @@ class Evaluation:
                 f"Must be one of: {', '.join(sorted(self.VALID_STATUSES))}"
             )
 
-        # Business rule: completed evaluation must have results
-        if self.status == "completed" and self.results is None:
-            raise ValueError("Completed evaluation must have results")
+        # Business rule: Results are now computed from question results
+        # Completed evaluations don't store results directly
 
         # Business rule: failed evaluation must have failure reason
         if self.status == "failed" and self.failure_reason is None:
@@ -92,10 +98,13 @@ class Evaluation:
             failure_reason=None,
         )
 
-    def complete_with_results(self, results: EvaluationResults) -> Evaluation:
-        """Complete evaluation with successful results.
+    def complete(self) -> Evaluation:
+        """Complete evaluation successfully.
 
-        Returns a new Evaluation instance with completed state and results.
+        Results are now computed from individual question results rather
+        than being stored directly in the evaluation entity.
+
+        Returns a new Evaluation instance with completed state.
         """
         if self.status != "running":
             raise ValueError(
@@ -111,7 +120,7 @@ class Evaluation:
             created_at=self.created_at,
             started_at=self.started_at,
             completed_at=datetime.now(),
-            results=results,
+            results=None,  # Results computed from question results
             failure_reason=None,
         )
 
@@ -144,3 +153,67 @@ class Evaluation:
         Business rule: Cannot be modified once status is 'completed' or 'failed'.
         """
         return self.status not in ["completed", "failed"]
+
+    def interrupt(self) -> Evaluation:
+        """Mark evaluation as interrupted, preserving partial progress.
+
+        Returns a new Evaluation instance with interrupted state.
+        Individual question results are preserved for potential resume.
+        """
+        if self.status != "running":
+            raise ValueError(
+                f"Cannot interrupt evaluation from status '{self.status}'. "
+                "Evaluation must be in 'running' state."
+            )
+
+        return Evaluation(
+            evaluation_id=self.evaluation_id,
+            agent_config=self.agent_config,
+            preprocessed_benchmark_id=self.preprocessed_benchmark_id,
+            status="interrupted",
+            created_at=self.created_at,
+            started_at=self.started_at,
+            completed_at=datetime.now(),
+            results=None,
+            failure_reason=None,
+        )
+
+    def get_progress(
+        self, question_result_repository: EvaluationQuestionResultRepository
+    ) -> ProgressInfo:
+        """Get current progress information from saved question results.
+
+        Args:
+            question_result_repository: Repository to query question results
+
+        Returns:
+            Progress information computed from saved results
+        """
+        from datetime import datetime
+
+        from ...application.dto.progress_info import ProgressInfo
+
+        # Get domain progress and convert to application DTO
+        domain_progress = question_result_repository.get_progress(
+            self.evaluation_id, total_questions=0  # This would need to be provided
+        )
+
+        # Parse latest_processed_at if it's a string, fallback to created_at
+        last_updated = self.created_at
+        if domain_progress.latest_processed_at:
+            try:
+                last_updated = datetime.fromisoformat(
+                    domain_progress.latest_processed_at
+                )
+            except ValueError:
+                last_updated = self.created_at
+
+        return ProgressInfo(
+            evaluation_id=domain_progress.evaluation_id,
+            current_question=domain_progress.completed_questions,
+            total_questions=domain_progress.total_questions,
+            successful_answers=domain_progress.successful_questions,
+            failed_questions=domain_progress.failed_questions,
+            started_at=self.started_at or self.created_at,
+            last_updated=last_updated,
+        )

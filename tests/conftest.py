@@ -17,10 +17,10 @@ def mock_openrouter_responses() -> dict[str, Any]:
                     }
                 }
             ],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 15, "total_tokens": 25},
+            "usage": {"prompt_tokens": 10, "completion_tokens": 15},
         },
         "capital_france": {
             "choices": [{"message": {"content": "The capital of France is Paris."}}],
-            "usage": {"prompt_tokens": 12, "completion_tokens": 8, "total_tokens": 20},
+            "usage": {"prompt_tokens": 12, "completion_tokens": 8},
         },
     }

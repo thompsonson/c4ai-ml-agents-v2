@@ -43,7 +43,6 @@ class EvaluationResults:
     correct_answers: int
     accuracy: float
     average_execution_time: float
-    total_tokens: int
     error_count: int
     detailed_results: list[QuestionResult]
     summary_statistics: dict[str, Any]
@@ -58,9 +57,6 @@ class EvaluationResults:
 
         if self.error_count < 0:
             raise ValueError("Error count cannot be negative")
-
-        if self.total_tokens < 0:
-            raise ValueError("Total tokens cannot be negative")
 
         if self.average_execution_time < 0:
             raise ValueError("Average execution time cannot be negative")
@@ -91,12 +87,6 @@ class EvaluationResults:
             "correct_answers": self.correct_answers,
             "error_count": self.error_count,
             "average_execution_time": self.average_execution_time,
-            "total_tokens": self.total_tokens,
-            "tokens_per_question": (
-                self.total_tokens / self.total_questions
-                if self.total_questions > 0
-                else 0
-            ),
             "success_rate": (
                 (self.total_questions - self.error_count) / self.total_questions
                 if self.total_questions > 0
@@ -133,3 +123,67 @@ class EvaluationResults:
             )
 
         return output.getvalue()
+
+    @classmethod
+    def from_question_results(
+        cls, question_results: list[Any]  # EvaluationQuestionResult instances
+    ) -> EvaluationResults:
+        """Compute evaluation results from individual question records.
+
+        This is the key method for Phase 8 - it transforms individual
+        EvaluationQuestionResult entities into the familiar EvaluationResults
+        value object, maintaining compatibility with existing interfaces.
+
+        Args:
+            question_results: List of individual question result entities
+
+        Returns:
+            Computed EvaluationResults value object
+        """
+        total_questions = len(question_results)
+
+        if total_questions == 0:
+            return cls(
+                total_questions=0,
+                correct_answers=0,
+                accuracy=0.0,
+                average_execution_time=0.0,
+                error_count=0,
+                detailed_results=[],
+                summary_statistics={},
+            )
+
+        # Count correct answers (only successful questions can be correct)
+        correct_answers = sum(1 for q in question_results if q.is_correct is True)
+
+        # Count errors (questions with error messages)
+        error_count = sum(1 for q in question_results if q.error_message is not None)
+
+        # Calculate average execution time
+        total_execution_time = sum(q.execution_time for q in question_results)
+        average_execution_time = total_execution_time / total_questions
+
+        # Calculate accuracy
+        accuracy = (correct_answers / total_questions) * 100.0
+
+        # Convert to legacy QuestionResult format for compatibility
+        detailed_results = [q.to_question_result() for q in question_results]
+
+        # Generate summary statistics
+        successful_questions = total_questions - error_count
+        summary_statistics = {
+            "successful_questions": successful_questions,
+            "failed_questions": error_count,
+            "success_rate": (successful_questions / total_questions) * 100.0,
+            "average_execution_time_seconds": average_execution_time,
+        }
+
+        return cls(
+            total_questions=total_questions,
+            correct_answers=correct_answers,
+            accuracy=accuracy,
+            average_execution_time=average_execution_time,
+            error_count=error_count,
+            detailed_results=detailed_results,
+            summary_statistics=summary_statistics,
+        )

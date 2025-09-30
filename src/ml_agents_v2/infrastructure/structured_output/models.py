@@ -1,17 +1,16 @@
 """Infrastructure output models for structured parsing."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class BaseReasoningOutput(BaseModel):
     """Base class for all reasoning approach output models."""
 
+    model_config = ConfigDict(
+        json_schema_extra={"required": ["answer"], "additionalProperties": False}
+    )
+
     answer: str = Field(description="Final answer from reasoning process")
-
-    class Config:
-        """Pydantic configuration."""
-
-        json_schema_extra = {"required": ["answer"], "additionalProperties": False}
 
 
 class DirectAnswerOutput(BaseReasoningOutput):
