@@ -34,7 +34,7 @@ class TestAlembicSetup:
 
     def test_alembic_ini_exists(self):
         """Test that alembic.ini configuration file exists."""
-        project_root = Path(__file__).parent.parent.parent.parent
+        project_root = Path(__file__).parent.parent.parent.parent.parent
         alembic_ini_path = project_root / "alembic.ini"
 
         assert alembic_ini_path.exists(), "alembic.ini configuration file should exist"
@@ -42,7 +42,7 @@ class TestAlembicSetup:
     def test_migrations_directory_exists(self):
         """Test that migrations directory structure exists."""
         # Get the correct path to the migrations directory
-        project_root = Path(__file__).parent.parent.parent.parent
+        project_root = Path(__file__).parent.parent.parent.parent.parent
         migrations_dir = (
             project_root
             / "src"

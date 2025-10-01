@@ -1,4 +1,4 @@
-.PHONY: help install test type-check format format-check lint clean dev-install quality-gates
+.PHONY: help install test type-check format format-check lint clean dev-install quality-gates bdd-tests
 
 # Default target
 help:
@@ -6,10 +6,13 @@ help:
 	@echo ""
 	@echo "Quality Gates (run before/after code changes):"
 	@echo "  quality-gates    Run all quality checks (test + type-check + format-check + lint)"
-	@echo "  test            Run pytest test suite"
+	@echo "  test            Run quality gates pytest test suite"
 	@echo "  type-check      Run mypy type checking"
 	@echo "  format-check    Check code formatting with black"
 	@echo "  lint            Run ruff linting"
+	@echo ""
+	@echo "Feature Development:"
+	@echo "  bdd-tests       Run BDD tests for features under development"
 	@echo ""
 	@echo "Development:"
 	@echo "  install         Install production dependencies"
@@ -28,7 +31,7 @@ dev-install:
 quality-gates:
 	@echo "Running quality gates..."
 	@printf "🧪 Tests: "; \
-	if uv run pytest -q >/dev/null 2>&1; then echo "OK"; else echo "FAILED"; uv run pytest -q; exit 1; fi
+	if uv run pytest tests/quality_gates -q >/dev/null 2>&1; then echo "OK"; else echo "FAILED"; uv run pytest tests/quality_gates -q; exit 1; fi
 	@printf "🔍 Type check: "; \
 	if uv run mypy src/ml_agents_v2 --no-error-summary >/dev/null 2>&1; then echo "OK"; else echo "FAILED"; uv run mypy src/ml_agents_v2; exit 1; fi
 	@printf "📐 Format check: "; \
@@ -38,8 +41,12 @@ quality-gates:
 	@echo "✅ All quality gates passed!"
 
 test:
-	@echo "🧪 Running tests..."
-	uv run pytest
+	@echo "🧪 Running quality gates tests..."
+	uv run pytest tests/quality_gates
+
+bdd-tests:
+	@echo "🎭 Running BDD tests..."
+	uv run pytest tests/bdd
 
 type-check:
 	@echo "🔍 Running type checks..."

@@ -9,15 +9,12 @@ This module implements the BDD scenarios defined in the structured output parsin
 All tests use deterministic mock data for fast, repeatable testing.
 """
 
-import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from ml_agents_v2.core.domain.services.llm_client import LLMClient, ParsedResponse
 from ml_agents_v2.core.domain.value_objects.agent_config import AgentConfig
 from ml_agents_v2.core.domain.value_objects.failure_reason import FailureReason
-from ml_agents_v2.core.domain.value_objects.question import Question
 from ml_agents_v2.infrastructure.reasoning_service import ReasoningInfrastructureService
 from ml_agents_v2.infrastructure.structured_output.exceptions import ParserException
 from ml_agents_v2.infrastructure.structured_output.models import (
@@ -29,23 +26,20 @@ from ml_agents_v2.infrastructure.structured_output.parsing_factory import (
     OutputParserFactory,
     StructuredLogProbsParser,
 )
-from tests.fixtures.structured_output_fixtures import (
+from tests.bdd.fixtures.structured_output_fixtures import (
     EMPTY_RESPONSES,
     INVALID_JSON,
     SCHEMA_MISMATCHES,
     VALID_RESPONSES,
-    mock_llm_client,
-    mock_parsed_response_factory,
-    sample_agent_config,
-    sample_domain_prompts,
-    sample_question,
 )
 
 
 class TestParserSelection:
     """BDD tests for parser selection logic based on model capabilities."""
 
-    def test_selects_structured_logprobs_parser_for_logprobs_models(self, mock_llm_client):
+    def test_selects_structured_logprobs_parser_for_logprobs_models(
+        self, mock_llm_client
+    ):
         """Given model supports logprobs, when creating parser, then returns StructuredLogProbsParser"""
         # Arrange
         factory = OutputParserFactory(mock_llm_client)
@@ -61,7 +55,9 @@ class TestParserSelection:
         """Given model doesn't support logprobs, when creating parser, then returns InstructorParser"""
         # Arrange
         factory = OutputParserFactory(mock_llm_client)
-        non_logprobs_model = "anthropic/claude-3-sonnet"  # Known to not support logprobs
+        non_logprobs_model = (
+            "anthropic/claude-3-sonnet"  # Known to not support logprobs
+        )
 
         # Act
         parser = factory.create_parser(non_logprobs_model)
@@ -96,7 +92,7 @@ class TestInstructorParser:
             model_provider="anthropic",
             model_name="claude-3-sonnet",
             model_parameters={"temperature": 1.0},
-            agent_parameters={}
+            agent_parameters={},
         )
 
     async def test_instructor_parser_successfully_parses_valid_json(
@@ -106,10 +102,14 @@ class TestInstructorParser:
         # Arrange
         valid_json = VALID_RESPONSES["direct_simple"]
         mock_response = mock_parsed_response_factory(valid_json)
-        instructor_parser.llm_client.chat_completion = AsyncMock(return_value=mock_response)
+        instructor_parser.llm_client.chat_completion = AsyncMock(
+            return_value=mock_response
+        )
 
         # Act
-        result = await instructor_parser.parse(DirectAnswerOutput, "test prompt", sample_config)
+        result = await instructor_parser.parse(
+            DirectAnswerOutput, "test prompt", sample_config
+        )
 
         # Assert
         assert "parsed_data" in result
@@ -123,11 +123,15 @@ class TestInstructorParser:
         # Arrange
         malformed_json = INVALID_JSON["missing_brace"]
         mock_response = mock_parsed_response_factory(malformed_json)
-        instructor_parser.llm_client.chat_completion = AsyncMock(return_value=mock_response)
+        instructor_parser.llm_client.chat_completion = AsyncMock(
+            return_value=mock_response
+        )
 
         # Act & Assert
         with pytest.raises(ParserException) as exc_info:
-            await instructor_parser.parse(DirectAnswerOutput, "test prompt", sample_config)
+            await instructor_parser.parse(
+                DirectAnswerOutput, "test prompt", sample_config
+            )
 
         exception = exc_info.value
         assert exception.parser_type == "InstructorParser"
@@ -142,11 +146,15 @@ class TestInstructorParser:
         # Arrange
         schema_mismatch = SCHEMA_MISMATCHES["wrong_field_name"]
         mock_response = mock_parsed_response_factory(schema_mismatch)
-        instructor_parser.llm_client.chat_completion = AsyncMock(return_value=mock_response)
+        instructor_parser.llm_client.chat_completion = AsyncMock(
+            return_value=mock_response
+        )
 
         # Act & Assert
         with pytest.raises(ParserException) as exc_info:
-            await instructor_parser.parse(DirectAnswerOutput, "test prompt", sample_config)
+            await instructor_parser.parse(
+                DirectAnswerOutput, "test prompt", sample_config
+            )
 
         exception = exc_info.value
         assert exception.parser_type == "InstructorParser"
@@ -160,11 +168,15 @@ class TestInstructorParser:
         # Arrange
         empty_response = EMPTY_RESPONSES["completely_empty"]
         mock_response = mock_parsed_response_factory(empty_response)
-        instructor_parser.llm_client.chat_completion = AsyncMock(return_value=mock_response)
+        instructor_parser.llm_client.chat_completion = AsyncMock(
+            return_value=mock_response
+        )
 
         # Act & Assert
         with pytest.raises(ParserException) as exc_info:
-            await instructor_parser.parse(DirectAnswerOutput, "test prompt", sample_config)
+            await instructor_parser.parse(
+                DirectAnswerOutput, "test prompt", sample_config
+            )
 
         exception = exc_info.value
         assert exception.parser_type == "InstructorParser"
@@ -183,7 +195,7 @@ class TestInstructorParser:
             model="test/model",
             stage="json_parse",
             content=content,
-            error=original_error
+            error=original_error,
         )
 
         # Assert
@@ -216,7 +228,7 @@ class TestStructuredLogProbsParser:
             model_provider="openai",
             model_name="gpt-4",
             model_parameters={"temperature": 0.7},
-            agent_parameters={}
+            agent_parameters={},
         )
 
     async def test_structured_logprobs_uses_response_format(
@@ -226,10 +238,14 @@ class TestStructuredLogProbsParser:
         # Arrange
         valid_json = VALID_RESPONSES["cot_simple"]
         mock_response = mock_parsed_response_factory(valid_json)
-        structured_parser.llm_client.chat_completion = AsyncMock(return_value=mock_response)
+        structured_parser.llm_client.chat_completion = AsyncMock(
+            return_value=mock_response
+        )
 
         # Act
-        await structured_parser.parse(ChainOfThoughtOutput, "test prompt", sample_config)
+        await structured_parser.parse(
+            ChainOfThoughtOutput, "test prompt", sample_config
+        )
 
         # Assert
         call_args = structured_parser.llm_client.chat_completion.call_args
@@ -249,12 +265,16 @@ class TestStructuredLogProbsParser:
         structured_data = {"answer": "4", "reasoning": "2+2=4"}
         mock_response = mock_parsed_response_factory(
             content='{"answer": "4", "reasoning": "2+2=4"}',
-            structured_data=structured_data
+            structured_data=structured_data,
         )
-        structured_parser.llm_client.chat_completion = AsyncMock(return_value=mock_response)
+        structured_parser.llm_client.chat_completion = AsyncMock(
+            return_value=mock_response
+        )
 
         # Act
-        result = await structured_parser.parse(ChainOfThoughtOutput, "test prompt", sample_config)
+        result = await structured_parser.parse(
+            ChainOfThoughtOutput, "test prompt", sample_config
+        )
 
         # Assert
         assert result["parsed_data"].answer == "4"
@@ -267,13 +287,16 @@ class TestStructuredLogProbsParser:
         # Arrange
         valid_json = VALID_RESPONSES["cot_simple"]
         mock_response = mock_parsed_response_factory(
-            content=valid_json,
-            structured_data=None  # No structured data available
+            content=valid_json, structured_data=None  # No structured data available
         )
-        structured_parser.llm_client.chat_completion = AsyncMock(return_value=mock_response)
+        structured_parser.llm_client.chat_completion = AsyncMock(
+            return_value=mock_response
+        )
 
         # Act
-        result = await structured_parser.parse(ChainOfThoughtOutput, "test prompt", sample_config)
+        result = await structured_parser.parse(
+            ChainOfThoughtOutput, "test prompt", sample_config
+        )
 
         # Assert
         assert result["parsed_data"].answer == "4"
@@ -286,11 +309,15 @@ class TestStructuredLogProbsParser:
         # Arrange
         empty_response = EMPTY_RESPONSES["completely_empty"]
         mock_response = mock_parsed_response_factory(empty_response)
-        structured_parser.llm_client.chat_completion = AsyncMock(return_value=mock_response)
+        structured_parser.llm_client.chat_completion = AsyncMock(
+            return_value=mock_response
+        )
 
         # Act & Assert
         with pytest.raises(ParserException) as exc_info:
-            await structured_parser.parse(ChainOfThoughtOutput, "test prompt", sample_config)
+            await structured_parser.parse(
+                ChainOfThoughtOutput, "test prompt", sample_config
+            )
 
         exception = exc_info.value
         assert exception.parser_type == "StructuredLogProbsParser"
@@ -314,7 +341,7 @@ class TestACLTranslation:
             model="anthropic/claude-3-sonnet",
             stage="json_parse",
             content="malformed json",
-            error=ValueError("Invalid JSON")
+            error=ValueError("Invalid JSON"),
         )
 
         # Act
@@ -336,7 +363,7 @@ class TestACLTranslation:
             model="openai/gpt-4",
             stage="schema_validation",
             content="test content",
-            error=ValueError("Schema mismatch")
+            error=ValueError("Schema mismatch"),
         )
 
         # Act
