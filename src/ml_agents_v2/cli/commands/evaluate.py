@@ -285,6 +285,7 @@ def list_evaluations(ctx: click.Context, status: str, benchmark: str) -> None:
         table.add_column("Benchmark", style="bold")
         table.add_column("Progress", justify="center", style="blue")
         table.add_column("Accuracy", justify="right", style="green")
+        table.add_column("Failures", justify="right", style="red")
         table.add_column("Created", style="dim")
 
         for evaluation in evaluations:
@@ -309,6 +310,7 @@ def list_evaluations(ctx: click.Context, status: str, benchmark: str) -> None:
             # Phase 8: Enhanced progress and accuracy display
             progress_text = "-"
             accuracy_text = "-"
+            failures_text = "-"
 
             try:
                 if evaluation.status in ["completed", "interrupted", "running"]:
@@ -322,6 +324,12 @@ def list_evaluations(ctx: click.Context, status: str, benchmark: str) -> None:
                         progress_text = (
                             f"{results.total_questions}/{results.total_questions}"
                         )
+                        failure_rate = (
+                            (results.error_count / results.total_questions) * 100
+                            if results.total_questions > 0
+                            else 0
+                        )
+                        failures_text = f"{failure_rate:.1f}%"
                     else:
                         # For interrupted/running evaluations, get current progress
                         progress_info = orchestrator.get_evaluation_progress(
@@ -330,6 +338,16 @@ def list_evaluations(ctx: click.Context, status: str, benchmark: str) -> None:
                         progress_text = f"{progress_info.current_question}/{progress_info.total_questions}"
                         if progress_info.current_question > 0:
                             accuracy_text = f"{progress_info.success_rate:.1f}%"
+                        failure_rate = (
+                            (
+                                progress_info.failed_questions
+                                / progress_info.total_questions
+                            )
+                            * 100
+                            if progress_info.total_questions > 0
+                            else 0
+                        )
+                        failures_text = f"{failure_rate:.1f}%"
                 elif evaluation.accuracy is not None:
                     # Fallback to stored accuracy for backwards compatibility
                     accuracy_text = f"{evaluation.accuracy:.1f}%"
@@ -356,6 +374,7 @@ def list_evaluations(ctx: click.Context, status: str, benchmark: str) -> None:
                 evaluation.benchmark_name,
                 progress_text,
                 accuracy_text,
+                failures_text,
                 time_text,
             )
 

@@ -43,7 +43,7 @@ class TestParserSelection:
         """Given model supports logprobs, when creating parser, then returns StructuredLogProbsParser"""
         # Arrange
         factory = OutputParserFactory(mock_llm_client)
-        logprobs_model = "openai/gpt-4"  # Known to support logprobs
+        logprobs_model = "gpt-4"  # Known to support logprobs
 
         # Act
         parser = factory.create_parser(logprobs_model)
@@ -55,9 +55,7 @@ class TestParserSelection:
         """Given model doesn't support logprobs, when creating parser, then returns InstructorParser"""
         # Arrange
         factory = OutputParserFactory(mock_llm_client)
-        non_logprobs_model = (
-            "anthropic/claude-3-sonnet"  # Known to not support logprobs
-        )
+        non_logprobs_model = "claude-3-sonnet"  # Known to not support logprobs
 
         # Act
         parser = factory.create_parser(non_logprobs_model)
@@ -136,7 +134,8 @@ class TestInstructorParser:
         exception = exc_info.value
         assert exception.parser_type == "InstructorParser"
         assert exception.stage == "json_parse"
-        assert exception.model == "anthropic/claude-3-sonnet"
+        assert exception.model == "claude-3-sonnet"
+        assert exception.provider == "anthropic"
         assert malformed_json in exception.content
 
     async def test_instructor_parser_raises_exception_on_schema_mismatch(
@@ -159,7 +158,8 @@ class TestInstructorParser:
         exception = exc_info.value
         assert exception.parser_type == "InstructorParser"
         assert exception.stage == "schema_validation"
-        assert exception.model == "anthropic/claude-3-sonnet"
+        assert exception.model == "claude-3-sonnet"
+        assert exception.provider == "anthropic"
 
     async def test_instructor_parser_raises_exception_on_empty_response(
         self, instructor_parser, sample_config, mock_parsed_response_factory
@@ -181,7 +181,8 @@ class TestInstructorParser:
         exception = exc_info.value
         assert exception.parser_type == "InstructorParser"
         assert exception.stage == "response_empty"
-        assert exception.model == "anthropic/claude-3-sonnet"
+        assert exception.model == "claude-3-sonnet"
+        assert exception.provider == "anthropic"
 
     def test_parser_exception_contains_full_context(self):
         """Given parsing failure, when exception raised, then contains parser_type, model, stage, content, error"""
@@ -192,7 +193,8 @@ class TestInstructorParser:
         # Act
         exception = ParserException(
             parser_type="InstructorParser",
-            model="test/model",
+            model="test-model",
+            provider="test",
             stage="json_parse",
             content=content,
             error=original_error,
@@ -200,7 +202,8 @@ class TestInstructorParser:
 
         # Assert
         assert exception.parser_type == "InstructorParser"
-        assert exception.model == "test/model"
+        assert exception.model == "test-model"
+        assert exception.provider == "test"
         assert exception.stage == "json_parse"
         assert exception.content == content
         assert exception.original_error == original_error
@@ -321,7 +324,7 @@ class TestStructuredLogProbsParser:
 
         exception = exc_info.value
         assert exception.parser_type == "StructuredLogProbsParser"
-        assert exception.model == "openai/gpt-4"
+        assert exception.model == "gpt-4"
 
 
 class TestACLTranslation:
@@ -338,7 +341,8 @@ class TestACLTranslation:
         # Arrange
         parser_exception = ParserException(
             parser_type="InstructorParser",
-            model="anthropic/claude-3-sonnet",
+            model="claude-3-sonnet",
+            provider="anthropic",
             stage="json_parse",
             content="malformed json",
             error=ValueError("Invalid JSON"),
@@ -351,7 +355,7 @@ class TestACLTranslation:
         assert isinstance(failure_reason, FailureReason)
         assert failure_reason.category == "parsing_error"
         assert "InstructorParser failed at json_parse" in failure_reason.description
-        assert "anthropic/claude-3-sonnet" in failure_reason.technical_details
+        assert "claude-3-sonnet" in failure_reason.technical_details
         assert "json_parse" in failure_reason.technical_details
         assert failure_reason.recoverable is False
 
@@ -360,7 +364,8 @@ class TestACLTranslation:
         # Arrange
         parser_exception = ParserException(
             parser_type="StructuredLogProbsParser",
-            model="openai/gpt-4",
+            model="gpt-4",
+            provider="openai",
             stage="schema_validation",
             content="test content",
             error=ValueError("Schema mismatch"),
@@ -373,4 +378,4 @@ class TestACLTranslation:
         assert "StructuredLogProbsParser" in failure_reason.description
         assert "schema_validation" in failure_reason.description
         assert "StructuredLogProbsParser" in failure_reason.technical_details
-        assert "openai/gpt-4" in failure_reason.technical_details
+        assert "gpt-4" in failure_reason.technical_details

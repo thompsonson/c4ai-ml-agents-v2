@@ -34,7 +34,7 @@ Follow **spec-driven development**: implementation flows from documented specifi
 - **Testing Strategy**: [v2-testing-strategy.md](documentation/v2-testing-strategy.md)
 - **Implementation Phases**: [v2-task-tracker.md](documentation/v2-task-tracker.md)
 
-### ATDD Workflow:
+### BDD Workflow:
 
 1. **Write failing test first** - describe expected behavior
 2. **Implement minimal code** to pass test
@@ -86,4 +86,4 @@ Strategy and patterns detailed in [v2-testing-strategy.md](documentation/v2-test
 
 ---
 
-All implementation details are in the referenced documentation files. Follow quality gates and ATDD workflow for consistent, reliable development.
+All implementation details are in the referenced documentation files. Follow quality gates and BDD workflow for consistent, reliable development.

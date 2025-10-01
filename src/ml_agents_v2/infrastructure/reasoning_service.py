@@ -1,6 +1,7 @@
 """Infrastructure service for executing domain reasoning strategies."""
 
 import time
+from datetime import datetime
 from typing import Any
 
 from ..core.domain.services.llm_client import LLMClient
@@ -12,6 +13,7 @@ from ..core.domain.value_objects.answer import Answer
 from ..core.domain.value_objects.failure_reason import FailureReason
 from ..core.domain.value_objects.question import Question
 from .openrouter.error_mapper import OpenRouterErrorMapper
+from .structured_output.exceptions import ParserException
 from .structured_output.parsing_factory import OutputParserFactory
 
 
@@ -60,6 +62,9 @@ class ReasoningInfrastructureService:
             # Infrastructure: Convert to Answer value object
             return self._convert_to_answer(reasoning_result, execution_time)
 
+        except ParserException as e:
+            # ACL Boundary - translate parser failures to domain type
+            return self._translate_parser_exception(e)
         except Exception as e:
             # Infrastructure: Map external errors to domain failures
             return self.error_mapper.map_to_failure_reason(e)
@@ -81,4 +86,24 @@ class ReasoningInfrastructureService:
             confidence=None,  # Not available with current parsing strategy
             execution_time=execution_time,
             raw_response=str(reasoning_result.final_answer),
+        )
+
+    def _translate_parser_exception(self, error: ParserException) -> FailureReason:
+        """ACL boundary - map parser failures to domain FailureReason.
+
+        Note: Uses string "parsing_error" not enum, per domain model implementation.
+        """
+        return FailureReason(
+            category="parsing_error",  # String constant from VALID_FAILURE_CATEGORIES
+            description=f"{error.parser_type} failed at {error.stage}",
+            technical_details=(
+                f"Parser: {error.parser_type}\n"
+                f"Model: {error.model}\n"
+                f"Provider: {error.provider}\n"
+                f"Stage: {error.stage}\n"
+                f"Original Error: {error.original_error}\n"
+                f"Content: {error.get_truncated_content()}"
+            ),
+            occurred_at=datetime.now(),
+            recoverable=False,
         )

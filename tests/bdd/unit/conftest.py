@@ -16,6 +16,21 @@ from ml_agents_v2.core.domain.value_objects.evaluation_results import Evaluation
 from ml_agents_v2.core.domain.value_objects.question import Question
 from ml_agents_v2.core.domain.value_objects.reasoning_trace import ReasoningTrace
 
+# Import structured output parsing fixtures
+from ..fixtures.structured_output_fixtures import (  # noqa: F401
+    EMPTY_RESPONSES,
+    INVALID_JSON,
+    SCHEMA_MISMATCHES,
+    VALID_RESPONSES,
+    chain_of_thought_schema,
+    direct_answer_schema,
+    mock_llm_client,
+    mock_parsed_response_factory,
+    sample_domain_prompts,
+    sample_question,
+    sample_responses,
+)
+
 
 @pytest.fixture
 def sample_agent_config():
