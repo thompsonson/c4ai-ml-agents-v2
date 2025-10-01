@@ -8,7 +8,7 @@ These tests validate that OpenRouterClient properly implements the ACL pattern:
 """
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -36,6 +36,32 @@ class MockCompletionUsage:
         }
 
 
+class MockChatCompletionMessage:
+    """Mock OpenAI ChatCompletionMessage."""
+
+    def __init__(self, content: str = "", parsed: Any = None):
+        self.content = content
+        self.parsed = parsed
+
+
+class MockChoice:
+    """Mock OpenAI Choice object."""
+
+    def __init__(self, message: MockChatCompletionMessage):
+        self.message = message
+
+
+class MockChatCompletion:
+    """Mock OpenAI ChatCompletion response object."""
+
+    def __init__(
+        self, choices: list[MockChoice], model: str = "gpt-4", id: str = "test-id"
+    ):
+        self.choices = choices
+        self.model = model
+        self.id = id
+
+
 class TestOpenRouterACLInterface:
     """Test OpenRouterClient implements LLMClient interface."""
 
@@ -50,26 +76,20 @@ class TestOpenRouterACLInterface:
 
     async def test_chat_completion_returns_parsed_response(self):
         """Test that chat_completion returns ParsedResponse domain object."""
-        # Mock the HTTP response to avoid real API calls
-
-        mock_response_data = {
-            "choices": [
-                {
-                    "message": {
-                        "content": "Test response from ACL",
-                        "parsed": {"answer": "42"},
-                    }
-                }
-            ],
-        }
+        # Create mock OpenAI response
+        mock_message = MockChatCompletionMessage(
+            content="Test response from ACL", parsed={"answer": "42"}
+        )
+        mock_choice = MockChoice(message=mock_message)
+        mock_response = MockChatCompletion(choices=[mock_choice])
 
         client = OpenRouterClient(api_key="test-key")
 
-        with patch("httpx.AsyncClient.post") as mock_post:
-            mock_response = MagicMock()
-            mock_response.json.return_value = mock_response_data
-            mock_response.raise_for_status.return_value = None
-            mock_post.return_value = mock_response
+        # Mock the OpenAI client's chat.completions.create method
+        with patch.object(
+            client._client.chat.completions, "create", new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.return_value = mock_response
 
             result = await client.chat_completion(
                 model="gpt-4", messages=[{"role": "user", "content": "test"}]
@@ -79,39 +99,31 @@ class TestOpenRouterACLInterface:
             assert result.content == "Test response from ACL"
             assert result.structured_data == {"answer": "42"}
 
+            # Verify the OpenAI client was called with correct parameters
+            mock_create.assert_called_once()
+            call_args = mock_create.call_args[1]
+            assert call_args["model"] == "gpt-4"
+            assert call_args["messages"] == [{"role": "user", "content": "test"}]
+
 
 class TestOpenRouterACLIntegration:
     """Test end-to-end ACL behavior with external API simulation."""
 
-    @pytest.fixture
-    def mock_httpx_client(self):
-        """Mock httpx client to simulate external API responses."""
-        return AsyncMock()
-
-    async def test_external_pydantic_response_normalized_to_domain(
-        self, mock_httpx_client
-    ):
+    async def test_external_pydantic_response_normalized_to_domain(self):
         """Test that external Pydantic response is normalized to domain types."""
-
-        # Simulate external API response with Pydantic usage
-        mock_response_data = {
-            "choices": [
-                {
-                    "message": {
-                        "content": "External API response",
-                        "parsed": {"answer": "42"},
-                    }
-                }
-            ],
-        }
+        # Create mock response with structured data
+        mock_message = MockChatCompletionMessage(
+            content="External API response", parsed={"answer": "42"}
+        )
+        mock_choice = MockChoice(message=mock_message)
+        mock_response = MockChatCompletion(choices=[mock_choice])
 
         client = OpenRouterClient(api_key="test-key")
 
-        with patch("httpx.AsyncClient.post") as mock_post:
-            mock_response = MagicMock()
-            mock_response.json.return_value = mock_response_data
-            mock_response.raise_for_status.return_value = None
-            mock_post.return_value = mock_response
+        with patch.object(
+            client._client.chat.completions, "create", new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.return_value = mock_response
 
             result = await client.chat_completion(
                 model="gpt-4", messages=[{"role": "user", "content": "test"}]
@@ -120,28 +132,21 @@ class TestOpenRouterACLIntegration:
             # Verify result is pure domain type
             assert isinstance(result, ParsedResponse)
             assert result.content == "External API response"
+            assert result.structured_data == {"answer": "42"}
 
-    async def test_external_dict_response_normalized_to_domain(self, mock_httpx_client):
+    async def test_external_dict_response_normalized_to_domain(self):
         """Test that external dict response is normalized to domain types."""
-
-        # Simulate external API response with dict usage (OpenRouter passthrough)
-        mock_response_data = {
-            "choices": [
-                {
-                    "message": {
-                        "content": "Dict response",
-                    }
-                }
-            ],
-        }
+        # Create mock response without structured data
+        mock_message = MockChatCompletionMessage(content="Dict response")
+        mock_choice = MockChoice(message=mock_message)
+        mock_response = MockChatCompletion(choices=[mock_choice])
 
         client = OpenRouterClient(api_key="test-key")
 
-        with patch("httpx.AsyncClient.post") as mock_post:
-            mock_response = MagicMock()
-            mock_response.json.return_value = mock_response_data
-            mock_response.raise_for_status.return_value = None
-            mock_post.return_value = mock_response
+        with patch.object(
+            client._client.chat.completions, "create", new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.return_value = mock_response
 
             result = await client.chat_completion(
                 model="claude-3-sonnet", messages=[{"role": "user", "content": "test"}]
@@ -150,6 +155,7 @@ class TestOpenRouterACLIntegration:
             # Verify result is pure domain type
             assert isinstance(result, ParsedResponse)
             assert result.content == "Dict response"
+            assert result.structured_data is None
 
     async def test_no_external_types_leak_to_domain(self):
         """Test that no external API types leak into domain layer."""

@@ -7,11 +7,10 @@ all external API types are normalized to consistent domain types.
 ALL type normalization happens here and ONLY here.
 """
 
-import json
 from typing import Any
 
-import httpx
 import structlog
+from openai import AsyncOpenAI
 
 from ...core.domain.services.llm_client import LLMClient
 from ...core.domain.value_objects.answer import ParsedResponse
@@ -51,19 +50,13 @@ class OpenRouterClient(LLMClient):
         self.max_retries = max_retries
         self._logger = structlog.get_logger(__name__)
 
-    def get_headers(self) -> dict[str, str]:
-        """Get HTTP headers for OpenRouter requests.
-
-        Returns:
-            Dictionary of headers including authentication and attribution
-        """
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/c4ai/ml-agents-v2",
-            "X-Title": "ML-Agents-v2",
-        }
-        return headers
+        # Initialize AsyncOpenAI client configured for OpenRouter
+        self._client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            timeout=timeout,
+            max_retries=max_retries,
+        )
 
     async def chat_completion(
         self,
@@ -98,84 +91,45 @@ class OpenRouterClient(LLMClient):
         model: str,
         messages: list[dict[str, str]],
         **kwargs: Any,
-    ) -> dict[str, Any]:
-        """Make the actual API request to OpenRouter.
+    ) -> Any:
+        """Make the actual API request to OpenRouter using OpenAI client.
 
-        This method handles the low-level HTTP communication and retry logic.
-        It returns raw API response that gets normalized by _translate_to_domain.
+        This method uses the AsyncOpenAI client to communicate with OpenRouter.
+        It returns the raw OpenAI response object that gets normalized by _translate_to_domain.
         """
-        url = f"{self.base_url}/chat/completions"
-        headers = self.get_headers()
+        # Prepare extra headers for OpenRouter attribution
+        extra_headers = {
+            "HTTP-Referer": "https://github.com/c4ai/ml-agents-v2",
+            "X-Title": "ML-Agents-v2",
+        }
 
-        # Build request payload with default parameters
-        payload = {
+        # Build request parameters with defaults
+        request_params = {
             "model": model,
             "messages": messages,
             "temperature": kwargs.get("temperature", 0.7),
             "top_p": kwargs.get("top_p", 1.0),
             "frequency_penalty": kwargs.get("frequency_penalty", 0.0),
             "presence_penalty": kwargs.get("presence_penalty", 0.0),
+            "extra_headers": extra_headers,
         }
 
-        # Add optional parameters
+        # Add optional parameters if provided
         if "max_tokens" in kwargs and kwargs["max_tokens"] is not None:
-            payload["max_tokens"] = kwargs["max_tokens"]
+            request_params["max_tokens"] = kwargs["max_tokens"]
         if "stop" in kwargs and kwargs["stop"] is not None:
-            payload["stop"] = kwargs["stop"]
+            request_params["stop"] = kwargs["stop"]
 
-        # Add any additional parameters (structured output, etc.)
+        # Add any additional parameters (structured output, logprobs, etc.)
         for key, value in kwargs.items():
-            if key not in payload and value is not None:
-                payload[key] = value
+            if key not in request_params and value is not None:
+                request_params[key] = value
 
-        # Make the request with retries
-        last_exception: (
-            httpx.HTTPStatusError | httpx.TimeoutException | httpx.RequestError | None
-        ) = None
+        # Make the request using OpenAI client (includes built-in retries)
+        response = await self._client.chat.completions.create(**request_params)
+        return response
 
-        for attempt in range(self.max_retries + 1):
-            try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(
-                        url=url,
-                        headers=headers,
-                        content=json.dumps(payload),
-                        timeout=self.timeout,
-                    )
-
-                # Raise for HTTP error status codes
-                response.raise_for_status()
-                return response.json()  # type: ignore[no-any-return]
-
-            except httpx.HTTPStatusError as e:
-                last_exception = e
-                # Don't retry on client errors (4xx) except rate limits
-                if 400 <= e.response.status_code < 500:
-                    if e.response.status_code == 429:  # Rate limit - can retry
-                        if attempt < self.max_retries:
-                            continue
-                    # For other 4xx errors, don't retry
-                    raise
-                # For 5xx errors, retry
-                if attempt < self.max_retries:
-                    continue
-                raise
-
-            except (httpx.TimeoutException, httpx.RequestError) as e:
-                last_exception = e
-                # Retry on network/timeout errors
-                if attempt < self.max_retries:
-                    continue
-                raise
-
-        # If we exhausted all retries, raise the last exception
-        if last_exception:
-            raise last_exception
-
-        # This should never be reached, but needed for type checking
-        raise RuntimeError("Failed to complete request after all retries")
-
-    def _translate_to_domain(self, api_response: dict[str, Any]) -> ParsedResponse:
+    def _translate_to_domain(self, api_response: Any) -> ParsedResponse:
         """THE method that converts external API chaos to domain order.
 
         This is the ONLY place in the system where external API types
@@ -190,9 +144,7 @@ class OpenRouterClient(LLMClient):
         self._logger.debug(
             "Starting API response translation to domain types",
             response_type=type(api_response).__name__,
-            has_choices=(
-                "choices" in api_response if isinstance(api_response, dict) else "N/A"
-            ),
+            has_choices=hasattr(api_response, "choices"),
         )
 
         # Extract content from response
@@ -200,46 +152,33 @@ class OpenRouterClient(LLMClient):
         structured_data = None
 
         try:
-            if "choices" in api_response and api_response["choices"]:
-                choice = api_response["choices"][0]
-                message = choice.get("message", {})
+            # Handle OpenAI ChatCompletion response object
+            if hasattr(api_response, "choices") and api_response.choices:
+                choice = api_response.choices[0]
+                message = choice.message
 
                 self._logger.debug(
                     "Processing message from API response",
                     message_type=type(message).__name__,
-                    message_keys=(
-                        list(message.keys()) if hasattr(message, "keys") else "N/A"
-                    ),
-                    has_content=(
-                        "content" in message
-                        if hasattr(message, "__contains__")
-                        else "N/A"
-                    ),
-                    has_parsed=(
-                        "parsed" in message
-                        if hasattr(message, "__contains__")
-                        else "N/A"
-                    ),
+                    has_content=hasattr(message, "content"),
+                    has_parsed=hasattr(message, "parsed"),
                 )
 
-                # Get content
-                content = message.get("content", "")
+                # Get content (handle both string and None)
+                content = message.content or ""
 
                 # Get structured data if available (OpenAI structured output)
                 try:
-                    if "parsed" in message and message["parsed"]:
-                        structured_data = message["parsed"]
+                    if hasattr(message, "parsed") and message.parsed:
+                        structured_data = message.parsed
                         self._logger.debug(
                             "Extracted structured data from response",
                             structured_data_type=type(structured_data).__name__,
                         )
                 except (TypeError, AttributeError) as e:
                     self._logger.error(
-                        "Failed to extract structured data - ChatCompletionMessage object detected",
+                        "Failed to extract structured data from OpenAI response",
                         message_type=type(message).__name__,
-                        message_attributes=(
-                            dir(message) if hasattr(message, "__dict__") else "N/A"
-                        ),
                         error=str(e),
                         error_type=type(e).__name__,
                     )
@@ -265,25 +204,34 @@ class OpenRouterClient(LLMClient):
         return ParsedResponse(content=content, structured_data=structured_data)
 
     async def health_check(self) -> dict[str, Any]:
-        """Check OpenRouter API health and get account information.
+        """Check OpenRouter API health by making a simple API call.
 
         Returns:
-            Dictionary with health status and account details
+            Dictionary with health status and response details
 
         Raises:
-            httpx.HTTPStatusError: For HTTP error responses
-            httpx.TimeoutException: For request timeouts
-            httpx.RequestError: For other request errors
+            Exception: For API errors or connection issues
         """
-        url = f"{self.base_url}/auth/key"
-        headers = self.get_headers()
-
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                url=url,
-                headers=headers,
-                timeout=self.timeout,
+        try:
+            # Make a simple chat completion request to test connectivity
+            response = await self._client.chat.completions.create(
+                model="openai/gpt-3.5-turbo",  # Use a reliable, cheap model for health check
+                messages=[{"role": "user", "content": "ping"}],
+                max_tokens=1,
+                extra_headers={
+                    "HTTP-Referer": "https://github.com/c4ai/ml-agents-v2",
+                    "X-Title": "ML-Agents-v2",
+                },
             )
 
-        response.raise_for_status()
-        return response.json()  # type: ignore[no-any-return]
+            # If we get here, the API is responding
+            return {
+                "status": "healthy",
+                "message": "OpenRouter API connection successful",
+                "model_used": response.model,
+                "response_id": response.id,
+            }
+
+        except Exception:
+            # Re-raise the exception to be handled by the health service
+            raise
