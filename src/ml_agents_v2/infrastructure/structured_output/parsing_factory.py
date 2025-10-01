@@ -51,7 +51,7 @@ class StructuredLogProbsParser:
 
         # Call through domain interface - gets clean ParsedResponse
         parsed_response = await self.llm_client.chat_completion(
-            model=config.model_name,
+            model=f"{config.model_provider}/{config.model_name}",
             messages=[{"role": "user", "content": prompt}],
             response_format=json_schema,
             logprobs=True,
@@ -198,7 +198,7 @@ Your entire response must be valid JSON only.
 
         # Call through domain interface - gets clean ParsedResponse
         parsed_response = await self.llm_client.chat_completion(
-            model=config.model_name,
+            model=f"{config.model_provider}/{config.model_name}",
             messages=[{"role": "user", "content": enhanced_prompt}],
             **config.model_parameters,
         )

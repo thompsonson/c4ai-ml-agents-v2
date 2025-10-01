@@ -455,6 +455,104 @@ def test_evaluation_logs_parser_failure_context():
     """Test that failure_reason includes parser_type and stage information"""
 ```
 
+### Phase 7: JSON Schema Instruction Verification
+
+#### 7.1 Mock Call Argument Testing
+Tests that verify the exact parameters sent to LLM clients, ensuring JSON schema instructions are properly added.
+
+#### 7.2 Production API Integration Testing
+Tests with real OpenRouter calls to verify end-to-end instruction formatting works with actual model responses.
+
+#### 7.3 ACL Boundary Protection Testing
+Tests that verify fallback error handling doesn't bypass structured output parsing exceptions.
+
+### Feature: JSON Schema Instruction Verification
+
+```gherkin
+Scenario: InstructorParser adds schema instructions to API call
+  Given an InstructorParser with DirectAnswerOutput schema
+  When I call parse() with domain prompt "What is 2+2?"
+  Then the LLM client should receive enhanced prompt
+  And the prompt should contain original domain text
+  And the prompt should contain "You must respond with valid JSON"
+  And the prompt should contain the exact JSON schema
+  And the prompt should contain formatting restrictions
+
+Scenario: Mock call arguments capture instruction formatting
+  Given a mocked LLM client
+  When InstructorParser processes a request
+  Then I can verify the messages parameter contains enhanced prompt
+  And I can verify the model parameter includes provider prefix
+  And I can verify no response_format parameter is added
+
+Scenario: StructuredLogProbsParser adds response_format parameter
+  Given a StructuredLogProbsParser with ChainOfThoughtOutput schema
+  When I call parse() with any prompt
+  Then the LLM client should receive response_format parameter
+  And the response_format should match the Pydantic schema
+  And logprobs should be enabled
+```
+
+#### 7.4 Implementation Patterns for Testing
+
+```python
+def test_instructor_parser_enhances_domain_prompt():
+    """Verify JSON schema instructions are added to domain prompts"""
+    # Setup
+    parser = InstructorParser(mock_llm_client)
+    domain_prompt = "Answer this question: What is 2+2?"
+
+    # Execute
+    await parser.parse(DirectAnswerOutput, domain_prompt, config)
+
+    # Verify call arguments
+    call_args = mock_llm_client.chat_completion.call_args
+    sent_messages = call_args.kwargs["messages"]
+    actual_prompt = sent_messages[0]["content"]
+
+    # Assertions
+    assert domain_prompt in actual_prompt  # Domain preserved
+    assert "You must respond with valid JSON" in actual_prompt
+    assert '"answer"' in actual_prompt  # Schema included
+    assert "Do not include any text outside" in actual_prompt
+
+def test_structured_logprobs_parser_sets_response_format():
+    """Verify StructuredLogProbsParser adds response_format parameter"""
+    # Setup
+    parser = StructuredLogProbsParser(mock_llm_client)
+
+    # Execute
+    await parser.parse(ChainOfThoughtOutput, "test prompt", config)
+
+    # Verify call arguments
+    call_args = mock_llm_client.chat_completion.call_args
+    assert "response_format" in call_args.kwargs
+    assert call_args.kwargs["logprobs"] is True
+
+    response_format = call_args.kwargs["response_format"]
+    assert response_format["type"] == "json_schema"
+    assert "json_schema" in response_format
+
+def test_acl_boundary_protection():
+    """Verify ParserException doesn't leak through error mapper fallback"""
+    # Setup with real error mapper (not mocked)
+    service = ReasoningInfrastructureService(mock_llm_client, real_error_mapper)
+
+    # Force ParserException
+    with patch.object(mock_llm_client, 'chat_completion') as mock_call:
+        mock_call.side_effect = ValueError("Empty response")  # Triggers ParserException
+
+        # Execute
+        result = await service.execute_reasoning(domain_service, question, config)
+
+        # Verify ACL translation occurred
+        assert isinstance(result, FailureReason)
+        assert result.category == "parsing_error"
+        assert "InstructorParser failed at response_empty" in result.description
+        # Should NOT be the generic OpenRouter error message
+        assert "Failed to parse response from OpenRouter API" not in result.description
+```
+
 ## Exception Flow Diagram
 
 ```mermaid
@@ -529,5 +627,98 @@ If implementation issues occur:
 2. **Keep current error handling** as interim solution
 3. **Analyze test failures** to understand root causes
 4. **Implement fixes incrementally** with test validation
+
+## Testing Methodology: Comprehensive API Integration Verification
+
+### Layer 1: Unit Tests with Mock Verification
+- **Purpose**: Verify instruction formatting logic in isolation
+- **Approach**: Mock LLM client, capture call arguments, verify parameters
+- **Coverage**: JSON schema instruction injection, parameter formatting
+- **Benefits**: Fast execution, deterministic results, comprehensive edge case coverage
+
+### Layer 2: Integration Tests with Real APIs
+- **Purpose**: Verify end-to-end instruction effectiveness
+- **Approach**: Real OpenRouter calls with actual models
+- **Coverage**: Model compatibility, response parsing, error handling
+- **Benefits**: Real-world validation, model-specific behavior verification
+
+### Layer 3: ACL Boundary Protection Tests
+- **Purpose**: Verify exception translation integrity
+- **Approach**: Test that infrastructure exceptions don't leak to application
+- **Coverage**: ParserException → FailureReason translation, error mapper isolation
+- **Benefits**: Architectural boundary enforcement, proper separation of concerns
+
+### Test Data Strategy
+
+#### Mock Data (Layer 1)
+- **Deterministic responses** for fast unit testing
+- **Crafted edge cases** to test specific failure modes
+- **Perfect control** over response content and structure
+- **Enables offline testing** of all parsing scenarios
+
+#### Real API Data (Layer 2)
+- **Actual model responses** for integration validation
+- **Real network conditions** and API behavior
+- **Model-specific quirks** and response patterns
+- **End-to-end verification** of instruction effectiveness
+
+#### Boundary Data (Layer 3)
+- **Exception scenarios** to test ACL protection
+- **Error mapper interactions** to verify proper routing
+- **Application layer isolation** verification
+- **Architectural compliance** testing
+
+### Continuous Verification Strategy
+
+#### Pre-commit Hooks
+- **Unit tests with mock verification** must pass
+- **JSON schema instruction formatting** tests required
+- **ACL boundary protection** tests must pass
+- **Fast feedback loop** for development
+
+#### CI Pipeline Testing
+- **Integration tests with real APIs** on key models
+- **Production scenario validation** with actual OpenRouter
+- **Error handling verification** across model types
+- **Performance impact assessment**
+
+#### Production Monitoring
+- **Error categorization** validates ACL boundaries
+- **Parsing failure rates** by model and parser type
+- **Instruction formatting effectiveness** metrics
+- **Real-world validation** of testing approach
+
+### Testing Implementation Guidelines
+
+#### Mock Call Verification Pattern
+```python
+# Verify exact parameters sent to API
+call_args = mock_llm_client.chat_completion.call_args
+assert "expected_content" in call_args.kwargs["messages"][0]["content"]
+assert call_args.kwargs["model"] == "provider/model-name"
+```
+
+#### Real API Integration Pattern
+```python
+# Test with actual OpenRouter models
+@pytest.mark.integration
+async def test_real_api_instruction_formatting():
+    real_client = OpenRouterClient(api_key=test_api_key)
+    parser = InstructorParser(real_client)
+    # Verify actual JSON schema instructions work
+```
+
+#### ACL Boundary Protection Pattern
+```python
+# Ensure proper exception translation
+def test_acl_boundary_enforcement():
+    # Force ParserException in infrastructure
+    # Verify FailureReason returned to application
+    # Confirm no infrastructure leakage
+```
+
+This comprehensive testing methodology ensures JSON schema instruction formatting works correctly across all layers, from isolated unit tests to production integration, while maintaining proper architectural boundaries and providing clear failure modes.
+
+---
 
 This plan ensures we understand the expected behavior before implementing fixes, leading to a robust and well-tested solution with clear failure modes and proper ACL boundaries.

@@ -114,6 +114,10 @@ class TestInstructorParser:
         assert result["parsed_data"].answer == "4"
         assert result["confidence_scores"] is None
 
+        # Verify model name includes provider
+        call_args = instructor_parser.llm_client.chat_completion.call_args
+        assert call_args.kwargs["model"] == "anthropic/claude-3-sonnet"
+
     async def test_instructor_parser_raises_exception_on_malformed_json(
         self, instructor_parser, sample_config, mock_parsed_response_factory
     ):
@@ -183,6 +187,41 @@ class TestInstructorParser:
         assert exception.stage == "response_empty"
         assert exception.model == "claude-3-sonnet"
         assert exception.provider == "anthropic"
+
+    async def test_instructor_parser_uses_instructor_library_for_structured_output(
+        self, instructor_parser, sample_config, mock_parsed_response_factory
+    ):
+        """Given InstructorParser instance and model without logprobs, when parsing, then uses instructor.from_openai() with response_model parameter"""
+        # Arrange
+        valid_json = VALID_RESPONSES["direct_simple"]
+        mock_response = mock_parsed_response_factory(valid_json)
+        instructor_parser.llm_client.chat_completion = AsyncMock(
+            return_value=mock_response
+        )
+
+        # Act
+        result = await instructor_parser.parse(
+            DirectAnswerOutput, "test prompt", sample_config
+        )
+
+        # Assert
+        assert "parsed_data" in result
+        assert result["parsed_data"].answer == "4"
+        # Verify instructor library integration - should fail until implemented
+        call_args = instructor_parser.llm_client.chat_completion.call_args
+        # Verify domain interface is preserved (no response_model leakage)
+        assert "response_model" not in call_args.kwargs
+        # Verify messages and model parameters follow domain contract
+        messages = call_args.kwargs["messages"]
+        assert len(messages) == 1
+        assert messages[0]["role"] == "user"
+        # Verify improved JSON schema handling (instructor quality vs manual)
+        prompt_content = messages[0]["content"]
+        # Should NOT use manual JSON schema instructions when instructor library is integrated
+        assert (
+            "You must respond with valid JSON matching this exact schema"
+            not in prompt_content
+        )
 
     def test_parser_exception_contains_full_context(self):
         """Given parsing failure, when exception raised, then contains parser_type, model, stage, content, error"""
@@ -255,6 +294,9 @@ class TestStructuredLogProbsParser:
         assert "response_format" in call_args.kwargs
         assert "logprobs" in call_args.kwargs
         assert call_args.kwargs["logprobs"] is True
+        assert (
+            call_args.kwargs["model"] == "openai/gpt-4"
+        )  # Full model name with provider
 
         response_format = call_args.kwargs["response_format"]
         assert response_format["type"] == "json_schema"
@@ -283,27 +325,25 @@ class TestStructuredLogProbsParser:
         assert result["parsed_data"].answer == "4"
         assert result["parsed_data"].reasoning == "2+2=4"
 
-    async def test_structured_logprobs_parses_content_as_json_fallback(
+    async def test_structured_logprobs_raises_exception_on_missing_structured_data(
         self, structured_parser, sample_config, mock_parsed_response_factory
     ):
-        """Given response with only content, when parsing, then parses content as JSON"""
+        """Given response without structured_data, when parsing, then raises ParserException"""
         # Arrange
-        valid_json = VALID_RESPONSES["cot_simple"]
         mock_response = mock_parsed_response_factory(
-            content=valid_json, structured_data=None  # No structured data available
+            content='{"answer": "4"}', structured_data=None  # Missing structured data
         )
         structured_parser.llm_client.chat_completion = AsyncMock(
             return_value=mock_response
         )
 
-        # Act
-        result = await structured_parser.parse(
-            ChainOfThoughtOutput, "test prompt", sample_config
-        )
+        # Act & Assert
+        with pytest.raises(ParserException) as exc_info:
+            await structured_parser.parse(
+                ChainOfThoughtOutput, "test prompt", sample_config
+            )
 
-        # Assert
-        assert result["parsed_data"].answer == "4"
-        assert result["parsed_data"].reasoning == "2+2 equals 4"
+        assert exc_info.value.stage == "structured_data_missing"
 
     async def test_structured_logprobs_raises_exception_on_failure(
         self, structured_parser, sample_config, mock_parsed_response_factory
@@ -325,6 +365,34 @@ class TestStructuredLogProbsParser:
         exception = exc_info.value
         assert exception.parser_type == "StructuredLogProbsParser"
         assert exception.model == "gpt-4"
+
+    async def test_structured_logprobs_extracts_confidence_scores_using_structured_logprobs(
+        self, structured_parser, sample_config, mock_parsed_response_factory
+    ):
+        """Given StructuredLogProbsParser instance and model with logprobs, when parsing, then uses add_logprobs() to analyze token probabilities and returns confidence scores"""
+        # Arrange
+        valid_json = VALID_RESPONSES["cot_simple"]
+        mock_response = mock_parsed_response_factory(valid_json)
+        structured_parser.llm_client.chat_completion = AsyncMock(
+            return_value=mock_response
+        )
+
+        # Act
+        result = await structured_parser.parse(
+            ChainOfThoughtOutput, "test prompt", sample_config
+        )
+
+        # Assert
+        assert "parsed_data" in result
+        assert result["parsed_data"].answer == "4"
+        # Verify structured-logprobs integration - should fail until implemented
+        assert result["confidence_scores"] is not None
+        assert isinstance(result["confidence_scores"], dict)
+        # Should contain confidence scores for structured output fields
+        assert "answer" in result["confidence_scores"]
+        assert isinstance(result["confidence_scores"]["answer"], float)
+        # Confidence scores are negative log probabilities
+        assert result["confidence_scores"]["answer"] < 0
 
 
 class TestACLTranslation:

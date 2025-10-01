@@ -193,3 +193,278 @@ def get_responses_by_failure_stage() -> dict[str, dict[str, str]]:
         "schema_validation": SCHEMA_MISMATCHES,
         "response_empty": EMPTY_RESPONSES,
     }
+
+
+# ============================================================================
+# API Call Verification Data - For Testing Instruction Formatting
+# ============================================================================
+
+DOMAIN_PROMPTS = {
+    # From NONE_STRATEGY
+    "direct_simple": "Answer the following question directly:\n\nQuestion: What is 2+2?",
+    "direct_complex": "Answer the following question directly:\n\nQuestion: Explain quantum computing.",
+
+    # From CHAIN_OF_THOUGHT_STRATEGY
+    "cot_simple": "Think step by step about this question:\n\nQuestion: What is 2+2?",
+    "cot_complex": "Think step by step about this question:\n\nQuestion: How does photosynthesis work?",
+}
+
+EXPECTED_ENHANCED_PROMPTS = {
+    # What InstructorParser should produce
+    "direct_simple_enhanced": '''Answer the following question directly:
+
+Question: What is 2+2?
+
+You must respond with valid JSON matching this exact schema:
+{
+  "type": "object",
+  "properties": {
+    "answer": {"type": "string"}
+  },
+  "required": ["answer"],
+  "additionalProperties": false
+}
+
+Do not include any text outside the JSON structure.
+Your entire response must be valid JSON only.''',
+}
+
+API_CALL_PARAMETERS = {
+    # Expected parameters for InstructorParser calls
+    "instructor_call": {
+        "model": "anthropic/claude-3-sonnet",  # With provider prefix
+        "messages": [{"role": "user", "content": "enhanced_prompt_here"}],
+        "temperature": 1.0,
+        "max_tokens": 1000,
+        # Note: NO response_format parameter
+    },
+
+    # Expected parameters for StructuredLogProbsParser calls
+    "structured_logprobs_call": {
+        "model": "openai/gpt-4",  # With provider prefix
+        "messages": [{"role": "user", "content": "original_prompt_here"}],
+        "response_format": {"type": "json_schema", "json_schema": {...}},
+        "logprobs": True,
+        "temperature": 0.7,
+    },
+}
+
+# ============================================================================
+# Mock Call Verification Helpers
+# ============================================================================
+
+def verify_instructor_call_args(mock_call_args, expected_domain_prompt: str):
+    """Helper to verify InstructorParser call arguments."""
+    assert mock_call_args.kwargs["model"].count("/") == 1  # Has provider
+
+    messages = mock_call_args.kwargs["messages"]
+    actual_prompt = messages[0]["content"]
+
+    assert expected_domain_prompt in actual_prompt
+    assert "You must respond with valid JSON" in actual_prompt
+    assert "response_format" not in mock_call_args.kwargs
+
+def verify_structured_logprobs_call_args(mock_call_args, expected_schema: dict):
+    """Helper to verify StructuredLogProbsParser call arguments."""
+    assert mock_call_args.kwargs["model"].count("/") == 1  # Has provider
+    assert "response_format" in mock_call_args.kwargs
+    assert mock_call_args.kwargs["logprobs"] is True
+
+    response_format = mock_call_args.kwargs["response_format"]
+    assert response_format["type"] == "json_schema"
+
+
+# ============================================================================
+# Production Integration Test Data - Real API Testing
+# ============================================================================
+
+REAL_MODEL_CONFIGS = {
+    # Models for testing InstructorParser integration
+    "instructor_models": [
+        {"provider": "anthropic", "name": "claude-3-sonnet"},
+        {"provider": "anthropic", "name": "claude-3-haiku"},
+        {"provider": "meta", "name": "llama-3.1-8b-instruct"},
+    ],
+
+    # Models for testing StructuredLogProbsParser integration
+    "structured_output_models": [
+        {"provider": "openai", "name": "gpt-4"},
+        {"provider": "openai", "name": "gpt-3.5-turbo"},
+    ],
+}
+
+INTEGRATION_TEST_QUESTIONS = {
+    # Simple questions for real API testing
+    "basic_math": {
+        "question": "What is 5 + 3?",
+        "expected_answer": "8",
+        "schema": "DirectAnswerOutput",
+        "timeout": 30,
+    },
+    "basic_reasoning": {
+        "question": "Why is the sky blue?",
+        "expected_answer": "Light scattering",
+        "schema": "ChainOfThoughtOutput",
+        "timeout": 60,
+    },
+    "simple_factual": {
+        "question": "What is the capital of Japan?",
+        "expected_answer": "Tokyo",
+        "schema": "DirectAnswerOutput",
+        "timeout": 30,
+    },
+}
+
+PRODUCTION_TEST_SCENARIOS = {
+    # Test real instruction formatting with actual models
+    "instructor_with_real_model": {
+        "description": "Verify InstructorParser works with real Anthropic model",
+        "model": "anthropic/claude-3-haiku",
+        "parser_type": "InstructorParser",
+        "expected_behavior": "Adds JSON schema instructions to prompt",
+        "success_criteria": "Returns valid structured JSON matching schema",
+    },
+    "structured_output_with_real_model": {
+        "description": "Verify StructuredLogProbsParser works with real OpenAI model",
+        "model": "openai/gpt-3.5-turbo",
+        "parser_type": "StructuredLogProbsParser",
+        "expected_behavior": "Uses response_format parameter",
+        "success_criteria": "Returns structured data from API",
+    },
+}
+
+
+# ============================================================================
+# ACL Boundary Protection Test Data
+# ============================================================================
+
+BOUNDARY_VIOLATION_SCENARIOS = {
+    # Test cases that verify proper exception translation
+    "openrouter_error_mapper_fallback": {
+        "description": "ValueError caught by OpenRouter error mapper instead of ACL",
+        "exception_type": "ValueError",
+        "exception_message": "Empty response",
+        "should_be_caught_by": "ReasoningInfrastructureService._translate_parser_exception",
+        "should_not_be_caught_by": "OpenRouterErrorMapper.map_to_failure_reason",
+        "expected_failure_reason": {
+            "category": "parsing_error",
+            "description": "InstructorParser failed at response_empty",
+            "contains_technical_details": ["Parser: InstructorParser", "Stage: response_empty"],
+        },
+        "incorrect_failure_reason": {
+            "category": "parsing_error",
+            "description": "Failed to parse response from OpenRouter API",
+            "technical_details": "Empty response",
+        },
+    },
+
+    "application_layer_isolation": {
+        "description": "Application layer should never see ParserException",
+        "exception_raised": "ParserException",
+        "application_layer_should_receive": "FailureReason",
+        "application_layer_should_not_import": "ParserException",
+        "test_modules": [
+            "ml_agents_v2.core.application.services.evaluation_orchestrator",
+            "ml_agents_v2.core.application.services.results_analyzer",
+        ],
+    },
+
+    "proper_acl_translation": {
+        "description": "ParserException properly translates to FailureReason at ACL boundary",
+        "parser_exceptions": {
+            "instructor_empty_response": {
+                "parser_type": "InstructorParser",
+                "model": "claude-3-sonnet",
+                "provider": "anthropic",
+                "stage": "response_empty",
+                "content": "",
+                "error": "ValueError('Empty response')",
+            },
+            "instructor_json_parse": {
+                "parser_type": "InstructorParser",
+                "model": "claude-3-sonnet",
+                "provider": "anthropic",
+                "stage": "json_parse",
+                "content": '{"answer": incomplete',
+                "error": "json.JSONDecodeError('Expecting ...')",
+            },
+            "structured_logprobs_schema": {
+                "parser_type": "StructuredLogProbsParser",
+                "model": "gpt-4",
+                "provider": "openai",
+                "stage": "schema_validation",
+                "content": '{"wrong_field": "value"}',
+                "error": "ValidationError('Field required')",
+            },
+        },
+        "expected_failure_reasons": {
+            "instructor_empty_response": {
+                "category": "parsing_error",
+                "description": "InstructorParser failed at response_empty",
+                "technical_details_contains": [
+                    "Parser: InstructorParser",
+                    "Model: claude-3-sonnet",
+                    "Provider: anthropic",
+                    "Stage: response_empty",
+                    "Original Error: Empty response",
+                ],
+                "recoverable": False,
+            },
+        },
+    },
+}
+
+ERROR_MAPPER_BOUNDARY_TESTS = {
+    # Scenarios to test that OpenRouter error mapper doesn't interfere
+    "should_not_catch_parser_exceptions": [
+        "ValueError('Empty response')",  # From ParserException
+        "json.JSONDecodeError('Expecting ...')",  # From JSON parsing
+        "ValidationError('Field required')",  # From schema validation
+    ],
+
+    "should_catch_openrouter_errors": [
+        "httpx.HTTPStatusError(400, 'Bad Request')",  # OpenRouter API errors
+        "httpx.TimeoutException('Request timeout')",  # Network timeouts
+        "httpx.RequestError('Connection failed')",  # Network failures
+    ],
+}
+
+def verify_acl_boundary_protection(reasoning_service, parser_exception):
+    """Helper to verify ACL boundary is properly maintained."""
+    # Should translate ParserException to FailureReason
+    failure_reason = reasoning_service._translate_parser_exception(parser_exception)
+
+    assert isinstance(failure_reason, FailureReason)
+    assert failure_reason.category == "parsing_error"
+    assert parser_exception.parser_type in failure_reason.description
+    assert parser_exception.stage in failure_reason.description
+
+    # Should include rich technical details
+    tech_details = failure_reason.technical_details
+    assert f"Parser: {parser_exception.parser_type}" in tech_details
+    assert f"Model: {parser_exception.model}" in tech_details
+    assert f"Provider: {parser_exception.provider}" in tech_details
+    assert f"Stage: {parser_exception.stage}" in tech_details
+
+    return failure_reason
+
+def verify_application_layer_isolation(application_module):
+    """Helper to verify application layer doesn't import infrastructure exceptions."""
+    import ast
+    import inspect
+
+    # Get module source code
+    source = inspect.getsource(application_module)
+    tree = ast.parse(source)
+
+    # Check imports
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if "ParserException" in [alias.name for alias in node.names]:
+                raise AssertionError(f"Application module {application_module.__name__} imports ParserException")
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if "ParserException" in alias.name:
+                    raise AssertionError(f"Application module {application_module.__name__} imports ParserException")
+
+    return True
