@@ -99,3 +99,4 @@ alembic/versions/*.py
 *.temp
 
 *.csv
+.aider*
