@@ -60,6 +60,12 @@ class ApplicationConfig(BaseSettings):
     # Development Settings
     debug_mode: bool = Field(default=False, description="Enable debug mode")
 
+    # Parsing Strategy
+    parsing_strategy: str = Field(
+        default="auto",
+        description="Structured output parsing strategy: 'auto', 'marvin', 'outlines'",
+    )
+
     # Agent Default Parameters
     none_agent_defaults: dict[str, Any] = Field(
         default_factory=lambda: {"temperature": 0.1, "max_tokens": 800},

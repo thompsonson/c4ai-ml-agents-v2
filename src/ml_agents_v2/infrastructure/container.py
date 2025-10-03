@@ -103,6 +103,9 @@ class Container(containers.DeclarativeContainer):
         ReasoningInfrastructureService,
         llm_client=openrouter_client,  # OpenRouterClient implements LLMClient
         error_mapper=openrouter_error_mapper,
+        api_key=config.provided.openrouter_api_key,
+        base_url=config.provided.openrouter_base_url,
+        parsing_strategy=config.provided.parsing_strategy,
     )
 
     health_checker = providers.Singleton(
