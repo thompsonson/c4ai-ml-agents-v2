@@ -15,17 +15,17 @@ import pytest
 
 from ml_agents_v2.core.domain.value_objects.agent_config import AgentConfig
 from ml_agents_v2.core.domain.value_objects.failure_reason import FailureReason
-from ml_agents_v2.infrastructure.reasoning_service import ReasoningInfrastructureService
-from ml_agents_v2.infrastructure.structured_output.exceptions import ParserException
-from ml_agents_v2.infrastructure.structured_output.models import (
+from ml_agents_v2.infrastructure.exceptions import ParserException
+from ml_agents_v2.infrastructure.models import (
     ChainOfThoughtOutput,
     DirectAnswerOutput,
 )
-from ml_agents_v2.infrastructure.structured_output.parsing_factory import (
+from ml_agents_v2.infrastructure.parsing_factory import (
     InstructorParser,
     OutputParserFactory,
     StructuredLogProbsParser,
 )
+from ml_agents_v2.infrastructure.reasoning_service import ReasoningInfrastructureService
 from tests.bdd.fixtures.structured_output_fixtures import (
     EMPTY_RESPONSES,
     INVALID_JSON,
@@ -121,7 +121,7 @@ class TestInstructorParser:
     async def test_instructor_parser_raises_exception_on_malformed_json(
         self, instructor_parser, sample_config, mock_parsed_response_factory
     ):
-        """Given malformed JSON, when parsing, then raises ParserException with stage='json_parse'"""
+        """Given malformed JSON, when parsing, then raises ParserException with stage='structured_data_missing'"""
         # Arrange
         malformed_json = INVALID_JSON["missing_brace"]
         mock_response = mock_parsed_response_factory(malformed_json)
@@ -137,7 +137,7 @@ class TestInstructorParser:
 
         exception = exc_info.value
         assert exception.parser_type == "InstructorParser"
-        assert exception.stage == "json_parse"
+        assert exception.stage == "structured_data_missing"
         assert exception.model == "claude-3-sonnet"
         assert exception.provider == "anthropic"
         assert malformed_json in exception.content
@@ -145,10 +145,12 @@ class TestInstructorParser:
     async def test_instructor_parser_raises_exception_on_schema_mismatch(
         self, instructor_parser, sample_config, mock_parsed_response_factory
     ):
-        """Given valid JSON that doesn't match schema, when parsing, then raises ParserException with stage='schema_validation'"""
-        # Arrange
+        """Given valid JSON that doesn't match schema, when Marvin/Outlines parses, then Pydantic validation catches it and client returns no structured_data"""
+        # Arrange - Mock a response with no structured_data (simulating Pydantic validation failure in client)
         schema_mismatch = SCHEMA_MISMATCHES["wrong_field_name"]
-        mock_response = mock_parsed_response_factory(schema_mismatch)
+        mock_response = mock_parsed_response_factory(
+            schema_mismatch, structured_data=None
+        )
         instructor_parser.llm_client.chat_completion = AsyncMock(
             return_value=mock_response
         )
@@ -161,14 +163,14 @@ class TestInstructorParser:
 
         exception = exc_info.value
         assert exception.parser_type == "InstructorParser"
-        assert exception.stage == "schema_validation"
+        assert exception.stage == "structured_data_missing"
         assert exception.model == "claude-3-sonnet"
         assert exception.provider == "anthropic"
 
     async def test_instructor_parser_raises_exception_on_empty_response(
         self, instructor_parser, sample_config, mock_parsed_response_factory
     ):
-        """Given empty response, when parsing, then raises ParserException with stage='response_empty'"""
+        """Given empty response, when parsing, then raises ParserException with stage='structured_data_missing'"""
         # Arrange
         empty_response = EMPTY_RESPONSES["completely_empty"]
         mock_response = mock_parsed_response_factory(empty_response)
@@ -184,7 +186,7 @@ class TestInstructorParser:
 
         exception = exc_info.value
         assert exception.parser_type == "InstructorParser"
-        assert exception.stage == "response_empty"
+        assert exception.stage == "structured_data_missing"
         assert exception.model == "claude-3-sonnet"
         assert exception.provider == "anthropic"
 

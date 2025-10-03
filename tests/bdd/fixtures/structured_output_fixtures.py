@@ -11,6 +11,7 @@ Usage in tests:
     from tests.fixtures.structured_output_fixtures import VALID_RESPONSES, INVALID_JSON, SCHEMA_MISMATCHES
 """
 
+import json
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
@@ -19,7 +20,7 @@ import pytest
 from ml_agents_v2.core.domain.services.llm_client import LLMClient, ParsedResponse
 from ml_agents_v2.core.domain.value_objects.agent_config import AgentConfig
 from ml_agents_v2.core.domain.value_objects.question import Question
-from ml_agents_v2.infrastructure.structured_output.models import (
+from ml_agents_v2.infrastructure.models import (
     ChainOfThoughtOutput,
     DirectAnswerOutput,
 )
@@ -270,14 +271,31 @@ def sample_question():
 def mock_parsed_response_factory():
     """Factory for creating mock ParsedResponse objects."""
 
+    _UNSET = object()
+
     def create_response(
         content: str,
-        structured_data: dict[str, Any] | None = None,
+        structured_data: dict[str, Any] | None = _UNSET,  # type: ignore
         token_usage: dict[str, int] | None = None,
     ) -> ParsedResponse:
-        """Create a mock ParsedResponse with specified data."""
+        """Create a mock ParsedResponse with specified data.
+
+        If structured_data is not provided and content is valid JSON,
+        automatically parse it to simulate what Marvin/Outlines clients do.
+        If structured_data=None is explicitly passed, don't auto-parse.
+        """
         response = Mock(spec=ParsedResponse)
         response.content = content
+
+        if structured_data is _UNSET:
+            if content.strip():
+                try:
+                    structured_data = json.loads(content)
+                except json.JSONDecodeError:
+                    structured_data = None
+            else:
+                structured_data = None
+
         response.structured_data = structured_data
         response.token_usage = token_usage or {
             "prompt_tokens": 10,
