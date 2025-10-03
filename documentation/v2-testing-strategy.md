@@ -309,22 +309,124 @@ def test_database():
 
 ### OpenRouter Mocking Strategy
 
+**Mock at Client Interface Level**: Mock `OpenRouterClient.chat_completion()` method to control LLM responses while testing real parsing logic.
+
 ```python
-class MockOpenRouterClient:
-    def __init__(self, response_patterns=None):
-        self.response_patterns = response_patterns or {}
-        self.call_count = 0
+# Mock OpenRouterClient to return controlled LLMResponse objects
+@patch.object(OpenRouterClient, 'chat_completion')
+async def test_parsing_strategy_selection(mock_chat):
+    """Test that PARSING_STRATEGY environment variable controls parser selection"""
 
-    async def chat_completion(self, model, messages, **kwargs):
-        self.call_count += 1
+    # Arrange - Control what the "LLM" returns
+    mock_chat.return_value = LLMResponse(
+        content='{"answer": "Paris"}',
+        structured_data={"answer": "Paris"},
+        has_structured_data=lambda: True,
+        usage={"total_tokens": 50}
+    )
 
-        # Return realistic but deterministic responses
-        user_message = messages[-1]["content"]
-        if "2+2" in user_message:
-            return {"choices": [{"message": {"content": "2+2 equals 4"}}]}
+    # Act - Test real parser selection with environment variable
+    with patch.dict(os.environ, {'PARSING_STRATEGY': 'outlines'}):
+        config = get_config()
+        service = ReasoningInfrastructureService(
+            llm_client=real_openrouter_client,
+            error_mapper=real_error_mapper,
+            api_key="test-key",
+            base_url="https://test.com",
+            parsing_strategy=config.parsing_strategy
+        )
 
-        return {"choices": [{"message": {"content": "Mock response"}}]}
+        result = await service.execute_reasoning(domain_service, question, agent_config)
+
+    # Assert - Verify behavior, not just types
+    assert isinstance(result, Answer)
+    assert result.extracted_answer == "Paris"
+
+    # Verify correct client was used (inspect call patterns)
+    assert mock_chat.called
+    call_kwargs = mock_chat.call_args[1]
+    # OutlinesClient should use response_format for structured output
+    assert 'response_format' in call_kwargs
 ```
+
+**Key Principles**:
+- **Mock External Boundaries**: Mock `OpenRouterClient.chat_completion()` to control LLM responses
+- **Test Real Logic**: Let actual parser selection, error handling, and config integration run
+- **Verify Behavior**: Test what the system does, not internal type checking
+- **Environment Integration**: Test that `PARSING_STRATEGY` actually affects parser selection
+
+### Structured Output Parsing Testing
+
+**BDD Tests for Parser Behavior**: Focus on testing parsing strategy selection and error handling behavior rather than implementation details.
+
+```python
+# Test parser selection based on environment configuration
+@patch.object(OpenRouterClient, 'chat_completion')
+async def test_outlines_strategy_uses_response_format(mock_chat):
+    """Given PARSING_STRATEGY=outlines, when processing question, then uses response_format"""
+
+    mock_chat.return_value = LLMResponse(
+        content='{"answer": "Test answer"}',
+        structured_data={"answer": "Test answer"},
+        has_structured_data=lambda: True
+    )
+
+    with patch.dict(os.environ, {'PARSING_STRATEGY': 'outlines'}):
+        result = await reasoning_service.execute_reasoning(domain_service, question, config)
+
+    # Verify OutlinesClient behavior (uses response_format)
+    call_kwargs = mock_chat.call_args[1]
+    assert 'response_format' in call_kwargs
+    assert call_kwargs['response_format']['type'] == 'json_schema'
+
+@patch.object(OpenRouterClient, 'chat_completion')
+async def test_marvin_strategy_uses_internal_agent_type(mock_chat):
+    """Given PARSING_STRATEGY=marvin, when processing question, then uses _internal_agent_type"""
+
+    mock_chat.return_value = LLMResponse(
+        content='Direct response',
+        structured_data={"answer": "Test answer"},
+        has_structured_data=lambda: True
+    )
+
+    with patch.dict(os.environ, {'PARSING_STRATEGY': 'marvin'}):
+        result = await reasoning_service.execute_reasoning(domain_service, question, config)
+
+    # Verify MarvinClient behavior (uses _internal_agent_type)
+    call_kwargs = mock_chat.call_args[1]
+    assert '_internal_agent_type' in call_kwargs
+    assert 'response_format' not in call_kwargs
+
+# Test error translation across the ACL boundary
+@patch.object(OpenRouterClient, 'chat_completion')
+async def test_parser_exception_translation_to_failure_reason(mock_chat):
+    """Given parser fails, when execute_reasoning, then returns FailureReason"""
+
+    # Simulate API returning empty content (causes parsing failure)
+    mock_chat.return_value = LLMResponse(
+        content="",
+        structured_data=None,
+        has_structured_data=lambda: False
+    )
+
+    result = await reasoning_service.execute_reasoning(domain_service, question, config)
+
+    # Verify ACL translation
+    assert isinstance(result, FailureReason)
+    assert result.category == "parsing_error"
+    assert "failed at" in result.description
+```
+
+**What NOT to Mock**:
+- ❌ `OutputParserFactory` creation logic
+- ❌ Parser selection based on model capabilities
+- ❌ Environment variable configuration loading
+- ❌ Error translation from `ParserException` to `FailureReason`
+
+**What TO Mock**:
+- ✅ `OpenRouterClient.chat_completion()` responses
+- ✅ Database operations
+- ✅ File system operations
 
 ## Error Testing Patterns
 
