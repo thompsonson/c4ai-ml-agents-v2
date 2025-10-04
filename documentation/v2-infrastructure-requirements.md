@@ -53,7 +53,7 @@ dev = [
 
 ### Overview
 
-The infrastructure layer implements an Anti-Corruption Layer (ACL) that protects the domain from external LLM API complexity and type variations. This layer ensures consistent domain types regardless of underlying provider differences.
+The infrastructure layer implements an Anti-Corruption Layer (ACL) that protects the domain from external LLM API complexity and type variations. This layer ensures consistent domain types regardless of underlying provider differences (OpenRouter, OpenAI, Anthropic, LiteLLM) and parsing strategies (Marvin, Outlines, LangChain, Instructor).
 
 **Key Principles:**
 - **Immediate Translation**: Convert external API responses to domain types at the boundary
@@ -652,17 +652,32 @@ from pydantic import Field
 from typing import Optional, Dict, Any
 
 class ApplicationConfig(BaseSettings):
-    """12-Factor App configuration using environment variables"""
+    """12-Factor App configuration using environment variables for multi-provider support"""
 
     # Database Configuration
     database_url: str = Field(default="sqlite:///ml_agents_v2.db", env="DATABASE_URL")
     database_echo: bool = Field(default=False, env="DATABASE_ECHO")
 
+    # Multi-Provider LLM Configuration
+    default_llm_provider: str = Field(default="openrouter", env="DEFAULT_LLM_PROVIDER")
+    parsing_strategy: str = Field(default="auto", env="PARSING_STRATEGY")
+
     # OpenRouter Configuration
-    openrouter_api_key: str = Field(..., env="OPENROUTER_API_KEY")
+    openrouter_api_key: Optional[str] = Field(default=None, env="OPENROUTER_API_KEY")
     openrouter_base_url: str = Field(default="https://openrouter.ai/api/v1", env="OPENROUTER_BASE_URL")
     openrouter_timeout: int = Field(default=60, env="OPENROUTER_TIMEOUT")
     openrouter_max_retries: int = Field(default=3, env="OPENROUTER_MAX_RETRIES")
+
+    # OpenAI Configuration
+    openai_api_key: Optional[str] = Field(default=None, env="OPENAI_API_KEY")
+    openai_timeout: int = Field(default=60, env="OPENAI_TIMEOUT")
+
+    # Anthropic Configuration
+    anthropic_api_key: Optional[str] = Field(default=None, env="ANTHROPIC_API_KEY")
+    anthropic_timeout: int = Field(default=60, env="ANTHROPIC_TIMEOUT")
+
+    # LiteLLM Configuration (can be complex JSON)
+    litellm_config: Optional[Dict[str, Any]] = Field(default=None, env="LITELLM_CONFIG")
 
     # Application Settings
     app_name: str = Field(default="ML-Agents-v2", env="APP_NAME")
@@ -691,10 +706,25 @@ def get_config() -> ApplicationConfig:
 **.env.example**
 
 ```bash
+# Multi-Provider Configuration
+DEFAULT_LLM_PROVIDER=openrouter
+PARSING_STRATEGY=auto
+
 # OpenRouter API Configuration
 OPENROUTER_API_KEY=sk-or-v1-your-api-key-here
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 OPENROUTER_TIMEOUT=60
+
+# OpenAI API Configuration (optional)
+# OPENAI_API_KEY=sk-your-openai-key-here
+# OPENAI_TIMEOUT=60
+
+# Anthropic API Configuration (optional)
+# ANTHROPIC_API_KEY=sk-ant-your-anthropic-key-here
+# ANTHROPIC_TIMEOUT=60
+
+# LiteLLM Configuration (optional, JSON format)
+# LITELLM_CONFIG={"model": "ollama/llama2", "api_base": "http://localhost:11434"}
 
 # Database Configuration
 DATABASE_URL=sqlite:///ml_agents_v2.db
@@ -832,6 +862,203 @@ def configure_logging(config: ApplicationConfig):
     )
 ```
 
+## Multi-Provider Factory Pattern
+
+### Overview
+
+To support multiple LLM providers (OpenRouter, OpenAI, Anthropic, LiteLLM) and multiple parsing strategies (Marvin, Outlines, LangChain, Instructor), the infrastructure implements a composite factory pattern that creates appropriate clients dynamically based on configuration.
+
+### LLMClientFactory Implementation
+
+```python
+# infrastructure/factories/llm_client_factory.py
+from abc import ABC, abstractmethod
+from typing import Dict, Any, List
+from core.domain.services.llm_client import LLMClient, LLMClientFactory
+
+class LLMClientFactoryImpl(LLMClientFactory):
+    """Concrete implementation of LLMClientFactory for multi-provider support."""
+
+    def __init__(
+        self,
+        provider_configs: Dict[str, Dict[str, Any]],
+        default_provider: str = "openrouter",
+        default_parsing_strategy: str = "auto"
+    ):
+        self.provider_configs = provider_configs
+        self.default_provider = default_provider
+        self.default_parsing_strategy = default_parsing_strategy
+
+    def create_client(
+        self,
+        model_name: str,
+        provider: str = None,
+        parsing_strategy: str = "auto"
+    ) -> LLMClient:
+        """Create appropriate client for model and strategy combination."""
+        # Auto-detect provider from model name if not specified
+        if provider is None:
+            provider = self._detect_provider(model_name)
+
+        # Create base provider client
+        base_client = self._create_provider_client(provider)
+
+        # Wrap with parsing strategy
+        return self._create_parsing_client(base_client, parsing_strategy, model_name)
+
+    def _detect_provider(self, model_name: str) -> str:
+        """Auto-detect provider from model name."""
+        if model_name.startswith(("gpt-", "o1-")):
+            return "openai"
+        elif model_name.startswith(("claude-",)):
+            return "anthropic"
+        elif model_name.startswith(("llama-", "mixtral-")):
+            return "openrouter"  # Default for open source models
+        else:
+            return self.default_provider
+
+    def _create_provider_client(self, provider: str) -> LLMClient:
+        """Create base LLM client for provider."""
+        config = self.provider_configs[provider]
+
+        if provider == "openrouter":
+            return OpenRouterClient(
+                api_key=config["api_key"],
+                base_url=config["base_url"],
+                timeout=config.get("timeout", 60),
+                max_retries=config.get("max_retries", 3)
+            )
+        elif provider == "openai":
+            return OpenAIClient(
+                api_key=config["api_key"],
+                timeout=config.get("timeout", 60)
+            )
+        elif provider == "anthropic":
+            return AnthropicClient(
+                api_key=config["api_key"],
+                timeout=config.get("timeout", 60)
+            )
+        elif provider == "litellm":
+            return LiteLLMClient(config)
+        else:
+            raise UnsupportedProviderError(f"Provider {provider} not supported")
+
+    def _create_parsing_client(
+        self, base_client: LLMClient, strategy: str, model_name: str
+    ) -> LLMClient:
+        """Wrap base client with parsing strategy."""
+        if strategy == "auto":
+            strategy = self._select_optimal_strategy(model_name)
+
+        if strategy == "marvin":
+            return MarvinParsingClient(base_client)
+        elif strategy == "outlines":
+            return OutlinesParsingClient(base_client)
+        elif strategy == "langchain":
+            return LangChainParsingClient(base_client)
+        elif strategy == "instructor":
+            return InstructorParsingClient(base_client)
+        elif strategy == "native":
+            return base_client  # Use provider's native structured output
+        else:
+            raise UnsupportedStrategyError(f"Strategy {strategy} not supported")
+
+    def _select_optimal_strategy(self, model_name: str) -> str:
+        """Select optimal parsing strategy based on model capabilities."""
+        # OpenAI models support native structured output
+        if model_name.startswith(("gpt-4", "gpt-3.5-turbo")):
+            return "native"
+        # Anthropic models work well with Marvin
+        elif model_name.startswith("claude-"):
+            return "marvin"
+        # Open source models benefit from constrained generation
+        else:
+            return "outlines"
+```
+
+### Provider Client Implementations
+
+Each provider implements the same domain interface while handling provider-specific details:
+
+```python
+# infrastructure/providers/openai_client.py
+from openai import AsyncOpenAI
+from core.domain.services.llm_client import LLMClient
+from core.domain.value_objects.parsed_response import ParsedResponse
+
+class OpenAIClient(LLMClient):
+    """OpenAI provider implementation with native structured output support."""
+
+    def __init__(self, api_key: str, timeout: int = 60):
+        self.client = AsyncOpenAI(api_key=api_key, timeout=timeout)
+
+    async def chat_completion(
+        self, model: str, messages: List[Dict[str, str]], **kwargs
+    ) -> ParsedResponse:
+        """Execute OpenAI chat completion."""
+        try:
+            response = await self.client.chat.completions.create(
+                model=model,
+                messages=messages,
+                **kwargs
+            )
+            return self._translate_to_domain(response)
+        except Exception as e:
+            raise self._map_provider_error(e)
+
+# infrastructure/providers/anthropic_client.py
+class AnthropicClient(LLMClient):
+    """Anthropic provider implementation."""
+    # Similar structure with Anthropic SDK
+
+# infrastructure/providers/litellm_client.py
+class LiteLLMClient(LLMClient):
+    """LiteLLM provider for accessing 100+ models."""
+    # Implements unified interface to multiple providers
+```
+
+### Parsing Strategy Implementations
+
+Parsing strategies wrap base clients to add structured output capabilities:
+
+```python
+# infrastructure/parsers/marvin_client.py
+import marvin
+from core.domain.services.llm_client import LLMClient
+
+class MarvinParsingClient(LLMClient):
+    """Marvin post-processing parsing strategy."""
+
+    def __init__(self, base_client: LLMClient):
+        self.base_client = base_client
+
+    async def chat_completion(
+        self, model: str, messages: List[Dict[str, str]], **kwargs
+    ) -> ParsedResponse:
+        """Execute completion with Marvin post-processing."""
+        # Extract parsing context from kwargs
+        agent_type = kwargs.pop("_internal_agent_type", "none")
+
+        # Get natural language response
+        response = await self.base_client.chat_completion(model, messages, **kwargs)
+
+        # Post-process with Marvin to extract structured data
+        try:
+            output_schema = self._get_output_schema(agent_type)
+            structured_data = await marvin.extract_async(
+                response.content, target=output_schema
+            )
+
+            return ParsedResponse(
+                content=response.content,
+                structured_data=structured_data.model_dump(),
+                token_usage=response.token_usage
+            )
+        except Exception:
+            # Return original response if parsing fails
+            return response
+```
+
 ## Service Container and Dependency Injection
 
 ### Container Configuration
@@ -841,13 +1068,13 @@ def configure_logging(config: ApplicationConfig):
 from dependency_injector import containers, providers
 from config.application_config import ApplicationConfig, get_config
 from infrastructure.database import DatabaseManager
-from infrastructure.openrouter_client import OpenRouterClient, OpenRouterConfig
+from infrastructure.factories.llm_client_factory import LLMClientFactoryImpl
 from infrastructure.reasoning_service import ReasoningInfrastructureService
 from application.services import EvaluationOrchestrator, BenchmarkProcessor
 from domain.services import ReasoningAgentServiceFactory
 
 class Container(containers.DeclarativeContainer):
-    """Dependency injection container"""
+    """Dependency injection container with multi-provider factory pattern"""
 
     # Configuration
     config = providers.Singleton(get_config)
@@ -858,23 +1085,38 @@ class Container(containers.DeclarativeContainer):
         config=config
     )
 
-    openrouter_client = providers.Singleton(
-        OpenRouterClient,
-        config=providers.Factory(
-            OpenRouterConfig,
-            api_key=config.provided.openrouter_api_key,
-            base_url=config.provided.openrouter_base_url,
-            timeout_seconds=config.provided.openrouter_timeout,
-            max_retries=config.provided.openrouter_max_retries,
-            app_name=config.provided.app_name,
-            app_url=config.provided.app_url
-        )
+    # Multi-provider LLM client factory
+    llm_client_factory = providers.Singleton(
+        LLMClientFactoryImpl,
+        provider_configs=providers.Dict(
+            openrouter=providers.Dict(
+                api_key=config.provided.openrouter_api_key,
+                base_url=config.provided.openrouter_base_url,
+                timeout=config.provided.openrouter_timeout,
+                max_retries=config.provided.openrouter_max_retries
+            ),
+            openai=providers.Dict(
+                api_key=config.provided.openai_api_key,
+                timeout=config.provided.openai_timeout.provided.or_(60)
+            ),
+            anthropic=providers.Dict(
+                api_key=config.provided.anthropic_api_key,
+                timeout=config.provided.anthropic_timeout.provided.or_(60)
+            ),
+            litellm=providers.Dict(
+                # LiteLLM configuration can be complex, use provider configs
+                config=config.provided.litellm_config.provided.or_({})
+            )
+        ),
+        default_provider=config.provided.default_llm_provider.provided.or_("openrouter"),
+        default_parsing_strategy=config.provided.parsing_strategy.provided.or_("auto")
     )
 
     reasoning_infrastructure_service = providers.Singleton(
         ReasoningInfrastructureService,
-        openrouter_client=openrouter_client,
-        error_mapper=providers.Factory(OpenRouterErrorMapper)
+        llm_client_factory=llm_client_factory,
+        error_mapper=providers.Factory(OpenRouterErrorMapper),
+        parsing_strategy=config.provided.parsing_strategy.provided.or_("auto")
     )
 
     # Domain Services
@@ -885,10 +1127,12 @@ class Container(containers.DeclarativeContainer):
     # Application Services
     evaluation_orchestrator = providers.Factory(
         EvaluationOrchestrator,
-        config=config,
-        database=database,
+        llm_client_factory=llm_client_factory,
+        evaluation_repo=database.provided.evaluation_repository,
+        question_result_repo=database.provided.question_result_repository,
+        benchmark_repo=database.provided.benchmark_repository,
         reasoning_service_factory=reasoning_service_factory,
-        reasoning_infrastructure_service=reasoning_infrastructure_service
+        config=config
     )
 
     benchmark_processor = providers.Factory(

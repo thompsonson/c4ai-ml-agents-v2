@@ -79,12 +79,50 @@ ml_agents_v2/
 │       │   │       ├── env.py
 │       │   │       ├── script.py.mako
 │       │   │       └── versions/
-│       │   ├── openrouter/
+│       │   ├── providers/        # LLM provider implementations
 │       │   │   ├── __init__.py
-│       │   │   ├── client.py
-│       │   │   └── error_mapper.py
-│       │   ├── container.py    # Dependency injection
-│       │   ├── health.py       # Health check service
+│       │   │   ├── openrouter/
+│       │   │   │   ├── __init__.py
+│       │   │   │   ├── client.py
+│       │   │   │   └── error_mapper.py
+│       │   │   ├── openai/
+│       │   │   │   ├── __init__.py
+│       │   │   │   ├── client.py
+│       │   │   │   └── error_mapper.py
+│       │   │   ├── anthropic/
+│       │   │   │   ├── __init__.py
+│       │   │   │   ├── client.py
+│       │   │   │   └── error_mapper.py
+│       │   │   └── litellm/
+│       │   │       ├── __init__.py
+│       │   │       ├── client.py
+│       │   │       └── error_mapper.py
+│       │   ├── parsers/          # Parsing strategy implementations
+│       │   │   ├── __init__.py
+│       │   │   ├── marvin/
+│       │   │   │   ├── __init__.py
+│       │   │   │   └── client.py
+│       │   │   ├── outlines/
+│       │   │   │   ├── __init__.py
+│       │   │   │   └── client.py
+│       │   │   ├── langchain/
+│       │   │   │   ├── __init__.py
+│       │   │   │   └── client.py
+│       │   │   └── instructor/
+│       │   │       ├── __init__.py
+│       │   │       └── client.py
+│       │   ├── factories/        # Factory implementations
+│       │   │   ├── __init__.py
+│       │   │   ├── llm_client_factory.py
+│       │   │   └── model_capabilities.py
+│       │   ├── models/           # Infrastructure Pydantic models
+│       │   │   ├── __init__.py
+│       │   │   ├── base_reasoning_output.py
+│       │   │   ├── direct_answer_output.py
+│       │   │   └── chain_of_thought_output.py
+│       │   ├── container.py      # Dependency injection
+│       │   ├── health.py         # Health check service
+│       │   ├── reasoning_service.py  # Infrastructure reasoning service
 │       │   └── logging_config.py  # Structured logging setup
 │       └── cli/                # CLI interface
 │           ├── __init__.py
@@ -112,7 +150,17 @@ ml_agents_v2/
     │   └── cli/
     ├── integration/            # Integration tests
     │   ├── database/
-    │   ├── openrouter/
+    │   ├── providers/          # Provider integration tests
+    │   │   ├── openrouter/
+    │   │   ├── openai/
+    │   │   ├── anthropic/
+    │   │   └── litellm/
+    │   ├── parsers/            # Parser strategy integration tests
+    │   │   ├── marvin/
+    │   │   ├── outlines/
+    │   │   ├── langchain/
+    │   │   └── instructor/
+    │   ├── factories/          # Factory integration tests
     │   └── cli/
     └── acceptance/             # End-to-end tests
         └── test_evaluation_workflow.py
@@ -161,11 +209,15 @@ Orchestrates domain operations and external interactions.
 
 ### `infrastructure/`
 
-External system integrations and technical implementations.
+External system integrations and technical implementations with multi-provider support.
 
 **database/**: SQLAlchemy models and repository implementations
-**openrouter/**: API client, error mapping, and model registry
-**container.py**: Dependency injection configuration
+**providers/**: LLM provider implementations (OpenRouter, OpenAI, Anthropic, LiteLLM)
+**parsers/**: Parsing strategy implementations (Marvin, Outlines, LangChain, Instructor)
+**factories/**: Factory implementations for provider and parser selection
+**models/**: Infrastructure Pydantic models for structured output
+**container.py**: Dependency injection configuration with factory pattern
+**reasoning_service.py**: Infrastructure reasoning service orchestrating providers and parsers
 
 ### `cli/`
 

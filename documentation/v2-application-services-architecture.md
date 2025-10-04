@@ -73,14 +73,14 @@ class EvaluationOrchestrator:
 
     def __init__(
         self,
-        llm_client: LLMClient,  # Domain interface - not infrastructure class
+        llm_client_factory: LLMClientFactory,  # Domain factory interface
         evaluation_repo: EvaluationRepository,  # Domain interface
         question_result_repo: EvaluationQuestionResultRepository,  # Domain interface
         benchmark_repo: PreprocessedBenchmarkRepository,  # Domain interface
         reasoning_service_factory: ReasoningAgentServiceFactory,  # Domain service
         config: ApplicationConfig
     ):
-        self.llm_client = llm_client  # Anti-Corruption Layer boundary
+        self.llm_client_factory = llm_client_factory  # Factory for dynamic client creation
         self.evaluation_repo = evaluation_repo
         self.question_result_repo = question_result_repo
         self.benchmark_repo = benchmark_repo
@@ -96,8 +96,32 @@ class EvaluationOrchestrator:
         pass
 
     def execute_evaluation(self, evaluation_id: EvaluationId) -> None:
-        """Execute evaluation with incremental question persistence"""
-        pass
+        """Execute evaluation with incremental question persistence.
+
+        Example implementation showing factory usage:
+        """
+        # Get evaluation and agent config
+        evaluation = self.evaluation_repo.get_by_id(evaluation_id)
+        agent_config = evaluation.agent_config
+
+        # Create appropriate LLM client for this specific model and provider
+        llm_client = self.llm_client_factory.create_client(
+            model_name=agent_config.model_name,
+            provider=agent_config.model_provider,
+            parsing_strategy=self.config.parsing_strategy
+        )
+
+        # Use the dynamically created client for reasoning
+        reasoning_service = self.reasoning_service_factory.create_service(
+            agent_config.agent_type
+        )
+
+        # Process questions with appropriate client
+        for question in benchmark.questions:
+            result = await reasoning_service.process_question_with_client(
+                question, agent_config, llm_client
+            )
+            # Save individual question result...
 
     def get_evaluation_status(self, evaluation_id: EvaluationId) -> EvaluationStatus:
         """Check current evaluation state"""
@@ -614,12 +638,13 @@ def _map_external_error(self, error: Exception) -> FailureReason:
 Type isolation enables clean, fast unit testing:
 
 ```python
-# Application service tests use domain mocks only
+# Application service tests use factory mocks for dynamic client creation
 @pytest.fixture
-def mock_llm_client():
-    """Mock domain interface - no external API dependencies."""
-    mock = Mock(spec=LLMClient)
-    mock.chat_completion.return_value = ParsedResponse(
+def mock_llm_client_factory():
+    """Mock factory interface - creates domain client mocks."""
+    mock_factory = Mock(spec=LLMClientFactory)
+    mock_client = Mock(spec=LLMClient)
+    mock_client.chat_completion.return_value = ParsedResponse(
         content="Test answer",
         structured_data={"answer": "42"},
         token_usage=TokenUsage.from_dict({
@@ -628,11 +653,19 @@ def mock_llm_client():
             "total_tokens": 15
         })
     )
-    return mock
+    mock_factory.create_client.return_value = mock_client
+    return mock_factory
 
-async def test_evaluation_execution(orchestrator, mock_llm_client):
-    """Test uses domain types only - no external API complexity."""
+async def test_evaluation_execution(orchestrator, mock_llm_client_factory):
+    """Test uses factory pattern - verifies correct client creation."""
     result = await orchestrator.execute_evaluation(evaluation_id)
+
+    # Verify factory was called with correct parameters
+    mock_llm_client_factory.create_client.assert_called_once_with(
+        model_name="gpt-4",
+        provider="openai",
+        parsing_strategy="marvin"
+    )
 
     # Assertions work with predictable domain types
     assert isinstance(result.token_usage, TokenUsage)

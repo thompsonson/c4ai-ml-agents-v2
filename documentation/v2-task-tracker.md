@@ -180,6 +180,79 @@
 
 **Target**: Production-ready incremental persistence enabling robust LLM research workflows
 
+## Phase 9: Multi-Provider Architecture 📋 **PLANNED**
+
+**Purpose**: Implement comprehensive multi-provider LLM support with multiple parsing strategies, replacing single-provider assumption with N×M provider×parser matrix
+
+### Domain Interface Updates
+
+- [ ] Update `LLMClientFactory` domain interface for multi-provider support
+- [ ] Add provider and strategy validation to domain layer
+- [ ] Update `AgentConfig` to support provider specification
+- [ ] Add domain exceptions for unsupported provider/strategy combinations
+
+### Infrastructure Factory Implementation
+
+- [ ] Implement `LLMClientFactoryImpl` with composite factory pattern
+- [ ] Create provider-specific client implementations:
+  - [ ] `OpenRouterClient` (existing, refactor for factory pattern)
+  - [ ] `OpenAIClient` with native structured output support
+  - [ ] `AnthropicClient` with SDK integration
+  - [ ] `LiteLLMClient` for 100+ model access
+- [ ] Create parsing strategy implementations:
+  - [ ] `MarvinParsingClient` for post-processing approach
+  - [ ] `OutlinesParsingClient` for constrained generation
+  - [ ] `LangChainParsingClient` for LangChain integration
+  - [ ] `InstructorParsingClient` for Instructor library support
+- [ ] Implement model capability detection and auto-strategy selection
+
+### Configuration Management Updates
+
+- [ ] Update `ApplicationConfig` for multi-provider environment variables
+- [ ] Add provider-specific configuration sections (API keys, timeouts, etc.)
+- [ ] Implement configuration validation for required provider credentials
+- [ ] Update `.env.example` with all provider configuration options
+
+### Dependency Injection Updates
+
+- [ ] Refactor container configuration to inject factory instead of concrete clients
+- [ ] Update `ReasoningInfrastructureService` to use factory for dynamic client creation
+- [ ] Update application services to receive `LLMClientFactory` instead of `LLMClient`
+- [ ] Remove static client creation in favor of per-request client selection
+
+### Testing Strategy Updates
+
+- [ ] Update BDD tests to mock factory instead of concrete clients
+- [ ] Add provider-specific integration tests for each LLM provider
+- [ ] Add parsing strategy integration tests for each parsing approach
+- [ ] Test provider×strategy combination matrix for compatibility
+- [ ] Update test mocking patterns to use factory mocking
+
+### CLI Enhancements
+
+- [ ] Add provider selection options to CLI commands
+- [ ] Add parsing strategy configuration options
+- [ ] Update help text to document provider and strategy choices
+- [ ] Add validation for provider/strategy compatibility
+
+### Documentation Updates (COMPLETED)
+
+- [x] Update v2-domain-model.md with factory pattern interfaces
+- [x] Update v2-application-services-architecture.md for factory injection patterns
+- [x] Update v2-infrastructure-requirements.md with multi-provider patterns and examples
+- [x] Update v2-project-structure.md with multi-provider directory structure
+- [x] Add comprehensive factory pattern documentation and configuration examples
+
+### Benefits Delivered
+
+- **Provider Flexibility**: Support for OpenRouter, OpenAI, Anthropic, LiteLLM
+- **Strategy Optimization**: Best parsing strategy selection per model type
+- **Graceful Fallback**: Auto-detection and optimal strategy selection
+- **Research Capabilities**: Compare same model across different providers
+- **Cost Optimization**: Use most cost-effective provider for each evaluation
+
+**Target**: Flexible multi-provider architecture enabling research across all major LLM providers and parsing strategies
+
 ## Implementation Order
 
 1. **Domain Layer** - Pure business logic, no dependencies
@@ -189,6 +262,7 @@
 5. **Testing** - Comprehensive coverage across all layers
 6. **Documentation** - Architecture documentation following DDD principles
 7. **Individual Question Persistence** - Enhanced persistence for research resilience
+8. **Multi-Provider Architecture** - Comprehensive provider and parsing strategy support
 
 ## Architecture Achievements
 

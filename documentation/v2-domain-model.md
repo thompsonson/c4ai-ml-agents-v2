@@ -168,6 +168,8 @@ class ReasoningAgentService:
 
 The LLMClient interface defines what the domain needs from LLM providers without exposing any external API implementation details. This interface acts as an Anti-Corruption Layer boundary, ensuring that domain logic never depends on external system types or behavior.
 
+**Note**: This interface is implemented by infrastructure clients (OpenRouterClient, OpenAIClient, etc.) but is NOT directly injected into application services. Instead, services use LLMClientFactory to create appropriate clients dynamically based on model and strategy requirements.
+
 **Domain Responsibilities:**
 
 - Provide consistent LLM interaction interface regardless of provider
@@ -227,8 +229,8 @@ This is a value object because configurations are reusable and shareable across 
 **Attributes**:
 
 - `agent_type`: Type of reasoning agent (None, CoT, PoT, etc.)
-- `model_provider`: LLM provider (Anthropic, OpenRouter, Cohere, etc.)
-- `model_name`: Specific model identifier
+- `model_provider`: LLM provider ("openrouter", "openai", "anthropic", "litellm", etc.)
+- `model_name`: Specific model identifier (e.g., "gpt-4", "claude-3-sonnet", "llama-3.1-70b")
 - `model_parameters`: Model-specific parameters (temperature, max_tokens, etc.)
 - `agent_parameters`: Agent-specific parameters
 
@@ -549,6 +551,87 @@ class ReasoningAgentServiceFactory:
     def validate_agent_type(self, agent_type: str) -> bool
 ```
 
+### LLMClientFactory
+
+**Purpose**: Domain interface for creating appropriate LLM clients based on provider and parsing strategy requirements
+
+The LLMClientFactory is the primary interface for application services to obtain LLM clients. It encapsulates the complexity of selecting the right provider and parsing strategy combination while maintaining clean domain boundaries.
+
+**Interface**:
+
+```python
+from abc import ABC, abstractmethod
+from typing import Dict, Any
+
+class LLMClientFactory(ABC):
+    """Domain interface for creating LLM clients with appropriate provider and parsing strategy.
+
+    Application services depend on this factory interface rather than concrete LLM clients,
+    enabling dynamic client selection based on model capabilities and configuration.
+    """
+
+    @abstractmethod
+    def create_client(
+        self,
+        model_name: str,
+        provider: str = None,
+        parsing_strategy: str = "auto"
+    ) -> LLMClient:
+        """Create appropriate LLM client for model and strategy.
+
+        Args:
+            model_name: Model identifier (e.g., "gpt-4", "claude-3-sonnet")
+            provider: LLM provider ("openrouter", "openai", "anthropic") or None for auto-detection
+            parsing_strategy: Parsing approach ("marvin", "outlines", "instructor", "auto")
+
+        Returns:
+            LLMClient: Configured client implementing domain interface
+
+        Raises:
+            UnsupportedModelError: If model is not supported by any provider
+            UnsupportedStrategyError: If strategy is not compatible with model
+        """
+        pass
+
+    @abstractmethod
+    def get_supported_models(self) -> List[str]:
+        """Return list of all supported model identifiers."""
+        pass
+
+    @abstractmethod
+    def get_supported_strategies(self) -> List[str]:
+        """Return list of all supported parsing strategies."""
+        pass
+
+    @abstractmethod
+    def validate_combination(self, model_name: str, provider: str, strategy: str) -> bool:
+        """Check if model + provider + strategy combination is valid."""
+        pass
+```
+
+**Design Principles**:
+
+- **Strategy Selection**: Factory selects optimal parsing strategy based on model capabilities when strategy="auto"
+- **Provider Selection**: Factory detects provider from model name or uses explicit provider parameter
+- **Domain Boundary**: Returns LLMClient domain interface, hiding infrastructure implementation details
+- **Configuration Driven**: Uses application configuration for API keys, base URLs, and default strategies
+
+**Usage Pattern**:
+
+```python
+# In application services
+async def execute_evaluation(self, config: AgentConfig):
+    # Factory creates appropriate client for this model
+    llm_client = self.llm_client_factory.create_client(
+        model_name=config.model_name,
+        provider=config.model_provider,
+        parsing_strategy=self.parsing_strategy
+    )
+
+    # Use client with domain interface
+    response = await llm_client.chat_completion(model, messages, **kwargs)
+```
+
 ## Domain Model Evolution
 
 ### Version 1.2 (Current)
@@ -579,7 +662,7 @@ class ReasoningAgentServiceFactory:
 
 - **Language**: Python 3.9+
 - **Persistence**: SQLite for development, extensible to PostgreSQL
-- **API Integration**: Multiple LLM providers (Anthropic, OpenRouter, Cohere)
+- **API Integration**: Multiple LLM providers (OpenRouter, OpenAI, Anthropic, LiteLLM) with multiple parsing strategies (Marvin, Outlines, LangChain, Instructor)
 - **Testing**: pytest with domain-focused test structure
 
 ### File Organization
