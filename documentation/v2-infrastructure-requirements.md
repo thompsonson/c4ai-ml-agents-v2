@@ -67,7 +67,6 @@ The infrastructure layer implements an Anti-Corruption Layer (ACL) that protects
 # infrastructure/llm/openrouter_client.py
 from core.domain.services.llm_client import LLMClient
 from core.domain.value_objects.parsed_response import ParsedResponse
-from core.domain.value_objects.token_usage import TokenUsage
 from openai import AsyncOpenAI
 from typing import List, Dict, Any
 import warnings
@@ -129,45 +128,10 @@ class OpenRouterClient(LLMClient):
             api_response.choices[0].message, 'parsed', None
         )
 
-        # Normalize token usage to domain TokenUsage
-        token_usage = self._normalize_token_usage(api_response.usage)
-
         return ParsedResponse(
             content=content,
-            structured_data=structured_data,
-            token_usage=token_usage
+            structured_data=structured_data
         )
-
-    def _normalize_token_usage(self, usage_data) -> TokenUsage | None:
-        """Normalize any external token usage format to domain TokenUsage.
-
-        Handles:
-        - OpenAI SDK Pydantic models (usage.model_dump())
-        - OpenRouter plain dictionaries
-        - Missing usage data (None)
-        - Invalid/unexpected formats
-        """
-        if usage_data is None:
-            return None
-
-        try:
-            # Handle Pydantic models (OpenAI SDK)
-            if hasattr(usage_data, 'model_dump'):
-                data = usage_data.model_dump(mode='json')
-            # Handle plain dictionaries (OpenRouter passthrough)
-            elif isinstance(usage_data, dict):
-                data = usage_data
-            else:
-                # Unexpected type - warn and return None
-                warnings.warn(f"Unexpected token usage type: {type(usage_data)}")
-                return None
-
-            # Use domain factory method for creation
-            return TokenUsage.from_dict(data)
-
-        except Exception as e:
-            warnings.warn(f"Token usage normalization failed: {e}")
-            return None
 
     def _map_external_error(self, error: Exception) -> Exception:
         """Map external API errors to domain exceptions."""
@@ -296,7 +260,6 @@ class ChainOfThoughtOutput(BaseReasoningOutput):
 # infrastructure/reasoning_service.py
 from core.domain.services.llm_client import LLMClient
 from core.domain.value_objects.parsed_response import ParsedResponse
-from core.domain.value_objects.token_usage import TokenUsage
 
 class ReasoningInfrastructureService:
     """Infrastructure service that coordinates domain reasoning with LLM calls.
@@ -346,15 +309,14 @@ class ReasoningInfrastructureService:
             # Domain: Process response using domain logic
             processing_metadata = {
                 "execution_time": execution_time,
-                "token_usage": parsed_response.token_usage.to_dict() if parsed_response.token_usage else None,
             }
 
             reasoning_result = domain_service.process_response(
                 parsed_response.content, processing_metadata
             )
 
-            # Infrastructure: Convert to domain Answer using domain value objects
-            return self._convert_to_answer(reasoning_result, parsed_response.token_usage, execution_time)
+            # Infrastructure: Convert to domain Answer
+            return self._convert_to_answer(reasoning_result, execution_time)
 
         except Exception as e:
             # Infrastructure: Map external errors to domain failures using domain interface
@@ -371,19 +333,14 @@ class ReasoningInfrastructureService:
     def _convert_to_answer(
         self,
         reasoning_result: Any,
-        token_usage: TokenUsage | None,
         execution_time: float
     ) -> Answer:
-        """Convert domain reasoning result to Answer value object.
-
-        Uses domain TokenUsage directly - no dict conversion needed.
-        """
+        """Convert domain reasoning result to Answer value object."""
         return Answer(
             extracted_answer=reasoning_result.get_answer(),
             reasoning_trace=reasoning_result.get_reasoning_trace(),
             confidence=None,  # TODO: Add confidence extraction from logprobs
             execution_time=execution_time,
-            token_usage=token_usage,  # Domain TokenUsage object directly
             raw_response=str(reasoning_result.final_answer),
         )
 ```

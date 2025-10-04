@@ -550,7 +550,6 @@ Following Clean Architecture and Domain-Driven Design principles, the applicatio
 #### 1. Domain Layer (Core)
 ```python
 # ✅ ALLOWED: Pure domain types
-from core.domain.value_objects.token_usage import TokenUsage
 from core.domain.value_objects.parsed_response import ParsedResponse
 from core.domain.services.llm_client import LLMClient  # Interface only
 
@@ -598,13 +597,9 @@ def _translate_to_domain(self, api_response) -> ParsedResponse:
     This method represents the Anti-Corruption Layer boundary.
     NO external types may pass through this boundary.
     """
-    # Convert ANY external token usage format to domain TokenUsage
-    token_usage = self._normalize_token_usage(api_response.usage)
-
     return ParsedResponse(  # Domain type - safe for upper layers
         content=api_response.choices[0].message.content,
-        structured_data=api_response.choices[0].message.parsed,
-        token_usage=token_usage  # Domain TokenUsage, not external type
+        structured_data=api_response.choices[0].message.parsed
     )
 ```
 
@@ -646,12 +641,7 @@ def mock_llm_client_factory():
     mock_client = Mock(spec=LLMClient)
     mock_client.chat_completion.return_value = ParsedResponse(
         content="Test answer",
-        structured_data={"answer": "42"},
-        token_usage=TokenUsage.from_dict({
-            "prompt_tokens": 10,
-            "completion_tokens": 5,
-            "total_tokens": 15
-        })
+        structured_data={"answer": "42"}
     )
     mock_factory.create_client.return_value = mock_client
     return mock_factory
@@ -668,8 +658,7 @@ async def test_evaluation_execution(orchestrator, mock_llm_client_factory):
     )
 
     # Assertions work with predictable domain types
-    assert isinstance(result.token_usage, TokenUsage)
-    assert result.token_usage.total_tokens == 15
+    assert result.extracted_answer == "42"
 ```
 
 ### Violation Detection

@@ -48,7 +48,7 @@ EvaluationQuestionResult {
 **Storage Decisions:**
 
 - One row per question-answer pair for incremental persistence
-- Preserve complex objects (TokenUsage, ReasoningTrace) as JSON
+- Preserve complex objects (ReasoningTrace) as JSON
 - Enable graceful interruption and resume capabilities
 
 ### PreprocessedBenchmark (Aggregate Root)
@@ -279,7 +279,6 @@ ON evaluations(json_extract(agent_config_json, '$.agent_type'));
 
 - `AgentConfig`: ~200-500 bytes (JSON)
 - `EvaluationQuestionResult`: ~1-5KB per record (depends on reasoning length)
-- `TokenUsage`: ~100 bytes (JSON)
 - `ReasoningTrace`: ~500-3000 bytes (depends on approach)
 
 ### Storage Projections
