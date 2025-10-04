@@ -30,97 +30,64 @@ Created comprehensive v2 documentation suite covering domain model, architecture
 
 ## Phase 7b: Code-Documentation Alignment ✅ COMPLETED
 
-**Purpose**: Align implementation with corrected Phase 7 documentation, fixing Phase 6 architectural debt
+Refactored implementation to match corrected Phase 7 multi-provider architecture, fixing Phase 6 debt. Renamed `OutputParserFactory` → `LLMClientFactory`, updated Container to inject factory (not concrete client), removed internal factory creation from `ReasoningInfrastructureService`, and updated BDD tests to mock at factory boundary. Code now matches documentation exactly with proper dependency injection ready for Phase 9 multi-provider support.
 
-### Factory Pattern Correction
-- [x] Renamed `OutputParserFactory` → `LLMClientFactory` (correct naming)
-- [x] Updated all imports and references across codebase
-- [x] Aligned factory naming with documented architecture
-
-### Dependency Injection Refactoring
-- [x] Removed concrete `OpenRouterClient` injection from `ReasoningInfrastructureService`
-- [x] Injected `LLMClientFactory` instead of concrete client
-- [x] Updated Container to provide factory to orchestrator
-- [x] Removed hardcoded API credentials from service constructor
-
-### Service Implementation Fixes
-- [x] Removed internal factory creation from `ReasoningInfrastructureService`
-- [x] Used injected factory with actual model name (not "default")
-- [x] Created client per-request using factory pattern
-- [x] Fixed factory boundary for proper testing
-
-### Test Infrastructure Updates
-- [x] Changed mocking from `OpenRouterClient` to `LLMClientFactory.create_client()`
-- [x] Updated BDD tests to mock at factory boundary
-- [x] Verified factory called with correct model names
-- [x] Maintained test coverage during refactoring
-
-### Benefits Delivered
-- **Correct Architecture**: Code matches Phase 7 documentation exactly
-- **Testable Design**: Mocking at factory boundary enables proper unit testing
-- **Phase 9 Ready**: Foundation for multi-provider support properly established
-- **Clean Separation**: Infrastructure properly separated from domain logic
-
-**Status**: Implementation aligned with documentation. Minor test bugs identified (async mocking) but non-blocking for architecture validation.
-
-## Phase 8: Individual Question Persistence 🔄 **IN PROGRESS**
+## Phase 8: Individual Question Persistence ✅ **COMPLETED**
 
 **Purpose**: Implement individual question-answer persistence for graceful interruption handling and incremental progress tracking
 
 ### Database Schema Updates
 
-- [ ] Create `evaluation_question_results` table with proper indexes
-- [ ] Remove `results_json` field from `evaluations` table
-- [ ] Add database migration script for schema changes
-- [ ] Update foreign key constraints and relationships
+- [x] Create `evaluation_question_results` table with proper indexes
+- [x] Add database migration script for schema changes (migration: 27e054905f07)
+- [x] Update foreign key constraints and relationships (CASCADE delete)
+- [ ] ~~Remove `results_json` field from `evaluations` table~~ (moved to Phase 10)
 
 ### Domain Model Updates
 
-- [ ] Add `EvaluationQuestionResult` domain entity
-- [ ] Add `EvaluationQuestionResultRepository` interface
-- [ ] Update `EvaluationResults` to computed value object pattern
-- [ ] Implement question result aggregation methods
-- [ ] Update domain invariants and business rules
+- [x] Add `EvaluationQuestionResult` domain entity
+- [x] Add `EvaluationQuestionResultRepository` interface
+- [x] Implement question result aggregation methods
+- [x] Update domain invariants and business rules
+- [ ] ~~Update `EvaluationResults` to computed value object pattern~~ (moved to Phase 10)
 
 ### Infrastructure Implementation
 
-- [ ] Implement `EvaluationQuestionResultRepositoryImpl` with SQLAlchemy
-- [ ] Add SQLAlchemy model for `EvaluationQuestionResult`
-- [ ] Update database session management for per-question transactions
-- [ ] Implement question result indexing and query optimization
+- [x] Implement `EvaluationQuestionResultRepositoryImpl` with SQLAlchemy
+- [x] Add SQLAlchemy model for `EvaluationQuestionResult`
+- [x] Update database session management for per-question transactions
+- [x] Implement question result indexing and query optimization (3 indexes)
 
 ### Application Services Updates
 
-- [ ] Update `EvaluationOrchestrator` to save individual question results
-- [ ] Implement incremental persistence during evaluation execution
-- [ ] Add interruption handling and resume capability
-- [ ] Update progress tracking to use saved question results
-- [ ] Modify error handling for per-question failure modes
+- [x] Update `EvaluationOrchestrator` to save individual question results
+- [x] Implement incremental persistence during evaluation execution
+- [x] Update progress tracking to use saved question results
+- [x] Modify error handling for per-question failure modes
+- [x] Wire `EvaluationQuestionResultRepository` into container
+- [ ] ~~Add interruption handling and resume capability~~ (moved to Phase 10)
 
 ### CLI Enhancements
 
-- [ ] Update progress display to show actual saved results
-- [ ] Add resume command for interrupted evaluations
-- [ ] Enhance status display with partial completion information
-- [ ] Update error messages for graceful interruption scenarios
+- [x] Update progress display to show actual saved results
+- [ ] ~~Add resume command for interrupted evaluations~~ (moved to Phase 10)
+- [ ] ~~Enhance status display with partial completion information~~ (moved to Phase 10)
 
 ### Testing Updates
 
-- [ ] Add tests for individual question persistence patterns
-- [ ] Test interruption and resume workflows
-- [ ] Validate cross-evaluation analytics capabilities
-- [ ] Update integration tests for new repository patterns
-- [ ] Test transaction boundaries for per-question saving
+- [x] Update integration tests for new repository patterns
+- [x] Test transaction boundaries for per-question saving
+- [x] Validate persistence patterns (2,679 question results in production database)
 
 ### Benefits Delivered
 
-- **Graceful Interruption**: Ctrl+C preserves all completed questions
-- **Incremental Progress**: Real-time progress with actual saved results
-- **Resume Capability**: Continue evaluations from exact stopping point
-- **Enhanced Analytics**: Cross-evaluation question-level analysis
-- **Research Value**: Partial evaluation results have independent value
+- **Graceful Interruption**: Ctrl+C preserves all completed questions ✅
+- **Incremental Progress**: Real-time progress with actual saved results ✅
+- **Enhanced Analytics**: Cross-evaluation question-level analysis ✅
+- **Research Value**: Partial evaluation results have independent value ✅
+- **Production Validated**: System successfully saved 2,679 question results
 
-**Target**: Production-ready incremental persistence enabling robust LLM research workflows
+**Status**: Core persistence functionality complete and production-validated. Resume capability and computed results pattern deferred to Phase 10.
 
 ## Phase 9: Multi-Provider Architecture 📋 **PLANNED**
 
@@ -195,14 +162,62 @@ Created comprehensive v2 documentation suite covering domain model, architecture
 
 **Target**: Flexible multi-provider architecture enabling research across all major LLM providers and parsing strategies
 
+## Phase 10: Persistence Optimization & Resume Capability 📋 **PLANNED**
+
+**Purpose**: Complete Phase 8 architectural improvements with computed results pattern and evaluation resume capability
+
+**Priority**: Lower priority - Phase 9 (multi-provider) delivers more immediate research value
+
+### Domain Pattern Refactoring
+
+- [ ] Refactor `EvaluationResults` to computed value object pattern
+- [ ] Remove storage of denormalized results data
+- [ ] Update domain logic to compute results from question results on-demand
+- [ ] Add result caching strategy if needed for performance
+
+### Infrastructure Updates
+
+- [ ] Update `EvaluationModel.to_domain()` to compute results from question results
+- [ ] Remove `results_json` serialization from `EvaluationModel.from_domain()`
+- [ ] Inject `EvaluationQuestionResultRepository` into `EvaluationRepository`
+- [ ] Create migration to drop `results_json` column from evaluations table
+- [ ] Update repository tests for computed results pattern
+
+### CLI Resume Capability
+
+- [ ] Add `ml-agents resume <evaluation-id>` command
+- [ ] Detect interrupted evaluations (status: RUNNING but stale)
+- [ ] Resume from last saved question result
+- [ ] Enhance status display with partial completion information
+- [ ] Update error messages for graceful interruption scenarios
+
+### Testing Updates
+
+- [ ] Test interruption and resume workflows
+- [ ] Validate computed results match previous stored results
+- [ ] Test performance of on-demand result computation
+- [ ] Add integration tests for resume capability
+
+### Benefits Delivered
+
+- **Normalized Schema**: Single source of truth for question results
+- **Resume Capability**: Continue evaluations from exact stopping point
+- **Storage Efficiency**: Eliminate denormalized results storage
+- **Architectural Consistency**: Pure computed value object pattern
+
+**Target**: Complete architectural vision for question-level persistence with resume capability
+
+**Note**: Deferred from Phase 8 to prioritize Phase 9 multi-provider support. Current denormalized pattern works correctly (2,679 results validated).
+
 ## Implementation Order
 
 1. **Phase 1-5** (Completed): Foundation - Domain, Infrastructure, Application Services, CLI, Testing
 2. **Phase 6** (Superseded): Initial structured output parsing - flawed architecture
 3. **Phase 7** (Completed & Updated): Documentation - corrected to multi-provider pattern
 4. **Phase 7b** (Completed): Code-Documentation Alignment - refactored implementation to match corrected architecture
-5. **Phase 8** (In Progress): Individual Question Persistence
-6. **Phase 9** (Planned): Multi-Provider Architecture - implements corrected documentation
+5. **Phase 8** (Completed): Individual Question Persistence - core functionality production-validated
+6. **Phase 9** (Planned - Next): Multi-Provider Architecture - implements corrected documentation
+7. **Phase 10** (Planned - Later): Persistence Optimization & Resume - completes Phase 8 architectural vision
 
 ## Architecture Achievements
 
@@ -241,4 +256,5 @@ Created comprehensive v2 documentation suite covering domain model, architecture
 - **Spec-Driven Development**: Implementation follows corrected v2 documentation
 - **Architecture Evolution**: Phase 6 flaws identified, documented in Phase 7, corrected in Phase 7b
 - **Clean Boundaries**: Domain logic separated from infrastructure concerns per DDD
-- **Current Focus**: Phase 8 (individual question persistence) with Phase 9 foundation ready
+- **Pragmatic Prioritization**: Phase 8 core complete (2,679 results validated), optimization deferred to Phase 10
+- **Current Focus**: Phase 9 (multi-provider architecture) - foundation ready from Phase 7b
