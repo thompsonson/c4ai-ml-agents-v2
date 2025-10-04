@@ -25,6 +25,12 @@ class ApplicationConfig(BaseSettings):
         default=False, description="Enable SQLAlchemy query logging"
     )
 
+    # Multi-Provider Configuration
+    default_llm_provider: str = Field(
+        default="openrouter",
+        description="Default LLM provider (openrouter, openai, anthropic, litellm)",
+    )
+
     # OpenRouter Configuration
     openrouter_api_key: str = Field(..., description="OpenRouter API key (required)")
     openrouter_base_url: str = Field(
@@ -35,6 +41,30 @@ class ApplicationConfig(BaseSettings):
     )
     openrouter_max_retries: int = Field(
         default=3, description="Maximum retry attempts for OpenRouter requests"
+    )
+
+    # OpenAI Configuration (optional)
+    openai_api_key: str | None = Field(
+        default=None, description="OpenAI API key (optional)"
+    )
+    openai_timeout: int = Field(
+        default=60, description="OpenAI request timeout in seconds"
+    )
+    openai_max_retries: int = Field(
+        default=3, description="Maximum retry attempts for OpenAI requests"
+    )
+
+    # Anthropic Configuration (optional)
+    anthropic_api_key: str | None = Field(
+        default=None, description="Anthropic API key (optional)"
+    )
+    anthropic_timeout: int = Field(
+        default=60, description="Anthropic request timeout in seconds"
+    )
+
+    # LiteLLM Configuration (optional, JSON format)
+    litellm_config: dict[str, Any] | None = Field(
+        default=None, description="LiteLLM configuration dictionary"
     )
 
     # Application Settings

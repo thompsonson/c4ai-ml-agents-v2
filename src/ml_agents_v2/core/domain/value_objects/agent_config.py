@@ -61,6 +61,14 @@ class AgentConfig:
                 f"Invalid agent_type '{self.agent_type}'. Must be one of: {valid_agent_types}"
             )
 
+        # Valid model providers (Phase 9 multi-provider support)
+        valid_providers = {"openrouter", "openai", "anthropic", "litellm"}
+        if self.model_provider not in valid_providers:
+            errors.append(
+                f"Invalid model_provider '{self.model_provider}'. "
+                f"Must be one of: {', '.join(sorted(valid_providers))}"
+            )
+
         # Validate model parameters
         if "temperature" in self.model_parameters:
             temp = self.model_parameters["temperature"]

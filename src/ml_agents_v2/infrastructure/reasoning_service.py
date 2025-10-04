@@ -4,6 +4,7 @@ import time
 from datetime import datetime
 from typing import Any
 
+from ..core.domain.services.llm_client import LLMClientFactory
 from ..core.domain.services.reasoning.reasoning_agent_service import (
     ReasoningAgentService,
 )
@@ -12,8 +13,9 @@ from ..core.domain.value_objects.answer import Answer
 from ..core.domain.value_objects.failure_reason import FailureReason
 from ..core.domain.value_objects.question import Question
 from .exceptions import ParserException
+from .models import BaseReasoningOutput, ChainOfThoughtOutput, DirectAnswerOutput
 from .openrouter.error_mapper import OpenRouterErrorMapper
-from .parsing_factory import InstructorParser, LLMClientFactory
+from .parsing_factory import InstructorParser
 
 
 class ReasoningInfrastructureService:
@@ -40,17 +42,16 @@ class ReasoningInfrastructureService:
             # Domain: Get prompt strategy and generate prompt
             prompt = domain_service.process_question(question, config)
 
-            # Infrastructure: Create client for this specific model
+            # Infrastructure: Create client for this specific model and provider (Phase 9)
             llm_client = self.llm_client_factory.create_client(
                 model_name=config.model_name,
+                provider=config.model_provider,  # Use provider from AgentConfig
                 strategy=self.parsing_strategy,
             )
             parser = InstructorParser(llm_client)
 
             # Infrastructure: Get output model and parse with structured output
-            output_model = self.llm_client_factory.get_output_model(
-                domain_service.get_agent_type()
-            )
+            output_model = self._get_output_model(domain_service.get_agent_type())
 
             # Infrastructure: Parse with structured output
             start_time = time.time()
@@ -97,6 +98,21 @@ class ReasoningInfrastructureService:
             execution_time=execution_time,
             raw_response=str(reasoning_result.final_answer),
         )
+
+    def _get_output_model(self, agent_type: str) -> type[BaseReasoningOutput]:
+        """Map domain agent type to infrastructure output model.
+
+        Args:
+            agent_type: Domain agent type string
+
+        Returns:
+            Infrastructure Pydantic model class
+        """
+        mapping: dict[str, type[BaseReasoningOutput]] = {
+            "none": DirectAnswerOutput,
+            "chain_of_thought": ChainOfThoughtOutput,
+        }
+        return mapping.get(agent_type, DirectAnswerOutput)
 
     def _translate_parser_exception(self, error: ParserException) -> FailureReason:
         """ACL boundary - map parser failures to domain FailureReason.

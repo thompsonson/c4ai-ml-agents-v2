@@ -1,5 +1,12 @@
 """Domain services - stateless business operations."""
 
+from .llm_client import (
+    LLMClient,
+    LLMClientFactory,
+    UnsupportedModelError,
+    UnsupportedProviderError,
+    UnsupportedStrategyError,
+)
 from .reasoning import (
     InvalidConfigurationError,
     ModelProviderError,
@@ -16,4 +23,9 @@ __all__ = [
     "ModelProviderError",
     "QuestionProcessingError",
     "TimeoutError",
+    "LLMClient",
+    "LLMClientFactory",
+    "UnsupportedProviderError",
+    "UnsupportedStrategyError",
+    "UnsupportedModelError",
 ]

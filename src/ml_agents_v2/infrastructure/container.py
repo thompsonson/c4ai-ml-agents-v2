@@ -28,11 +28,13 @@ from ml_agents_v2.infrastructure.database.repositories.evaluation_repository_imp
     EvaluationRepositoryImpl,
 )
 from ml_agents_v2.infrastructure.database.session_manager import DatabaseSessionManager
+from ml_agents_v2.infrastructure.factories.llm_client_factory_impl import (
+    LLMClientFactoryImpl,
+)
 from ml_agents_v2.infrastructure.health import HealthChecker
 from ml_agents_v2.infrastructure.logging_config import configure_logging
 from ml_agents_v2.infrastructure.openrouter.client import OpenRouterClient
 from ml_agents_v2.infrastructure.openrouter.error_mapper import OpenRouterErrorMapper
-from ml_agents_v2.infrastructure.parsing_factory import LLMClientFactory
 from ml_agents_v2.infrastructure.reasoning_service import ReasoningInfrastructureService
 
 
@@ -100,10 +102,31 @@ class Container(containers.DeclarativeContainer):
         OpenRouterErrorMapper,
     )
 
+    # Multi-Provider LLM Client Factory (Phase 9)
     llm_client_factory = providers.Singleton(
-        LLMClientFactory,
-        api_key=config.provided.openrouter_api_key,
-        base_url=config.provided.openrouter_base_url,
+        LLMClientFactoryImpl,
+        provider_configs=providers.Dict(
+            openrouter=providers.Dict(
+                api_key=config.provided.openrouter_api_key,
+                base_url=config.provided.openrouter_base_url,
+                timeout=config.provided.openrouter_timeout,
+                max_retries=config.provided.openrouter_max_retries,
+            ),
+            openai=providers.Dict(
+                api_key=config.provided.openai_api_key,
+                timeout=config.provided.openai_timeout,
+                max_retries=config.provided.openai_max_retries,
+            ),
+            anthropic=providers.Dict(
+                api_key=config.provided.anthropic_api_key,
+                timeout=config.provided.anthropic_timeout,
+            ),
+            litellm=providers.Callable(
+                lambda cfg: cfg or {}, cfg=config.provided.litellm_config
+            ),
+        ),
+        default_provider=config.provided.default_llm_provider,
+        default_parsing_strategy=config.provided.parsing_strategy,
     )
 
     reasoning_infrastructure_service = providers.Singleton(

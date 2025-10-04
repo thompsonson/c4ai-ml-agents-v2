@@ -92,9 +92,11 @@ class TestParsingStrategySelection:
         assert isinstance(result, Answer)
         assert result.extracted_answer == "Paris"
 
-        # Verify factory was called with correct strategy
+        # Verify factory was called with correct strategy and provider (Phase 9)
         mock_factory.create_client.assert_called_once_with(
-            model_name=sample_agent_config.model_name, strategy="outlines"
+            model_name=sample_agent_config.model_name,
+            provider=sample_agent_config.model_provider,
+            strategy="outlines",
         )
 
         # Verify LLM client was called (implementation details tested separately)
@@ -132,9 +134,11 @@ class TestParsingStrategySelection:
         assert isinstance(result, Answer)
         assert result.extracted_answer == "Paris"
 
-        # Verify factory was called with correct strategy
+        # Verify factory was called with correct strategy and provider (Phase 9)
         mock_factory.create_client.assert_called_once_with(
-            model_name=sample_agent_config.model_name, strategy="marvin"
+            model_name=sample_agent_config.model_name,
+            provider=sample_agent_config.model_provider,
+            strategy="marvin",
         )
 
         # Verify LLM client was called (implementation details tested separately)
@@ -176,10 +180,10 @@ class TestParsingStrategySelection:
                 domain_service, sample_question, gpt4_config
             )
 
-        # Assert - Verify behavior and factory usage
+        # Assert - Verify behavior and factory usage (Phase 9: includes provider)
         assert isinstance(result, Answer)
         mock_factory.create_client.assert_called_once_with(
-            model_name="gpt-4", strategy="auto"
+            model_name="gpt-4", provider="openai", strategy="auto"
         )
 
         # Verify LLM client was called (implementation details tested separately)
