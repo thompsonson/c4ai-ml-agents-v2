@@ -1,39 +1,95 @@
 # ML Agents v2 Testing Strategy
 
-**Version:** 1.1
-**Date:** 2025-09-17
-**Purpose:** Testing approach for research platform reliability and non-deterministic response handling
+**Version:** 1.2
+**Date:** 2025-10-04
+**Purpose:** Dual testing approach for research platform reliability and non-deterministic response handling
 
 ## Overview
 
-The ML Agents v2 testing strategy prioritizes research workflow validation while accommodating LLM response variability. Unlike traditional software testing focused on deterministic outputs, our approach validates reasoning patterns, evaluation accuracy, and platform reliability.
+ML Agents v2 employs a dual testing strategy that separates rapid development feedback from comprehensive behavior validation:
+
+1. **Quality Gates**: Fast, focused checks ensuring code quality, type safety, and architectural integrity
+2. **BDD Tests**: Comprehensive behavior-driven tests validating complete user workflows and system integration
+
+This separation allows developers to iterate quickly with quality gates while maintaining thorough validation through BDD tests when needed.
+
+## Testing Approaches
+
+### Quality Gates (`make quality-gates`)
+
+**Purpose**: Rapid validation of code quality and architectural patterns
+
+**Components**:
+- **Type checking** (mypy): Domain/infrastructure boundary enforcement
+- **Code formatting** (black): Consistent style
+- **Linting** (ruff): Code quality and best practices
+- **Fast unit tests** (pytest subset): Critical domain logic only
+
+**Execution**: < 30 seconds for complete suite
+
+**When to run**:
+- Before every commit (required)
+- During active development (recommended)
+- In CI/CD pipeline (automated)
+
+**Coverage focus**:
+- Domain entity invariants and business rules
+- Value object equality and validation
+- Factory pattern correct usage
+- Interface contract compliance
+
+### BDD Tests (`make bdd-tests`)
+
+**Purpose**: Comprehensive behavior validation against specifications
+
+**Components**:
+- **Feature tests**: Complete user workflows from CLI to database
+- **Integration tests**: Cross-layer service coordination
+- **Error scenario tests**: Failure mode handling and recovery
+- **Non-deterministic response tests**: LLM output pattern validation
+
+**Execution**: 2-5 minutes for complete suite
+
+**When to run**:
+- Before pull requests (required)
+- After architectural changes (required)
+- When modifying user-facing features (recommended)
+- Full regression validation (as needed)
+
+**Coverage focus**:
+- End-to-end evaluation workflows
+- Multi-provider client integration
+- Parser strategy selection
+- Error translation across ACL boundaries
 
 ## Testing Philosophy
 
 ### Research Platform Requirements
 
-- **Workflow Reliability**: Evaluation pipelines execute consistently
-- **Data Integrity**: Results accurately captured and stored
-- **Failure Transparency**: Error conditions clearly diagnosed
-- **Pattern Validation**: Reasoning traces follow expected structures
+The testing strategy ensures the platform reliably executes researcher workflows without validating LLM output quality:
 
-### Non-Deterministic Response Handling
+- **Workflow Reliability**: Evaluation pipelines execute consistently from CLI to database
+- **Data Integrity**: Responses captured and stored exactly as received from LLM
+- **Failure Transparency**: API errors correctly translated to domain FailureReasons
+- **Configuration Fidelity**: Agent configs (type, model, provider, strategy) applied correctly
 
-- **Structure over Content**: Validate response format rather than exact text
-- **Pattern Recognition**: Check reasoning traces contain expected elements
-- **Answer Extraction**: Verify clean answer separation from reasoning
-- **Error Classification**: Ensure failure reasons properly categorized
+**Important**: The system does not validate LLM response quality or reasoning correctness. It processes whatever the LLM returns according to the configured agent type and saves results for researcher analysis.
 
-## Test Categories
+## Quality Gates Tests
 
-### 1. Unit Tests (Domain Layer)
+**Focus**: Fast, isolated validation of code quality and domain logic correctness
 
-**Focus**: Pure business logic validation
+**Characteristics**:
+- No external dependencies (no API calls, no database)
+- Execution time: < 30 seconds total
+- Run before every commit
+- Validates architectural patterns and business rules
 
-**Domain Entity Tests**:
+### Domain Entity Business Rules
 
 ```python
 def test_evaluation_lifecycle_transitions():
+    """Evaluation must transition through valid states only"""
     evaluation = Evaluation.create(agent_config, benchmark_id)
     assert evaluation.status == EvaluationStatus.PENDING
 
@@ -44,17 +100,18 @@ def test_evaluation_lifecycle_transitions():
     assert evaluation.status == EvaluationStatus.COMPLETED
 
 def test_evaluation_business_rules():
+    """Cannot modify completed evaluation"""
     completed_evaluation = create_completed_evaluation()
 
-    # Cannot modify completed evaluation
     with pytest.raises(BusinessRuleViolation):
         completed_evaluation.start_execution()
 ```
 
-**Value Object Tests**:
+### Value Object Validation
 
 ```python
 def test_agent_config_equality():
+    """AgentConfig uses value equality, not reference equality"""
     config1 = AgentConfig(agent_type="cot", model="claude-3-sonnet")
     config2 = AgentConfig(agent_type="cot", model="claude-3-sonnet")
 
@@ -62,15 +119,17 @@ def test_agent_config_equality():
     assert config1 is not config2   # Different instances
 
 def test_failure_reason_categorization():
+    """FailureReason correctly categorizes error types"""
     timeout_failure = FailureReason.network_timeout("Request timed out")
-    assert timeout_failure.category == FailureCategory.NETWORK_TIMEOUT
+    assert timeout_failure.category == "network_timeout"
     assert timeout_failure.recoverable == True
 ```
 
-**Domain Service Tests**:
+### Domain Service Factory Logic
 
 ```python
 def test_reasoning_agent_factory():
+    """ReasoningAgentServiceFactory returns correct agent implementations"""
     factory = ReasoningAgentServiceFactory()
 
     cot_agent = factory.create_service("chain_of_thought")
@@ -81,123 +140,25 @@ def test_reasoning_agent_factory():
         factory.create_service("unknown_agent")
 ```
 
-### 2. Integration Tests (Application Services) ✅ IMPLEMENTED
+## BDD Tests
 
-**Focus**: Service coordination and external system integration
+**Focus**: Complete system behavior validation across all layers
 
-**Implemented Test Structure**:
+**Characteristics**:
+- Tests complete workflows from CLI to database
+- Includes external system integration (mocked providers)
+- Execution time: 2-5 minutes total
+- Run before pull requests and after architectural changes
+- Validates user-facing features and cross-layer coordination
 
-```
-tests/unit/application/
-├── conftest.py              # Application layer fixtures and mocks
-├── test_dtos.py            # DTO calculations and validation
-├── test_error_mapper.py    # Error mapping between layers
-├── test_evaluation_orchestrator.py  # Core orchestration workflows
-└── test_integration.py     # Service coordination patterns
-```
-
-**Pragmatic Testing Approach**: High-value tests focusing on critical business workflows rather than exhaustive coverage.
-
-**Orchestration Tests** (Implemented):
-
-```python
-async def test_execute_evaluation_basic_workflow(self, orchestrator, sample_evaluation):
-    # Arrange
-    mock_evaluation_repository.get_by_id.return_value = sample_evaluation
-    mock_benchmark_repository.get_by_id.return_value = sample_benchmark
-    mock_reasoning_agent.answer_question.return_value = sample_answer
-
-    # Act
-    await orchestrator.execute_evaluation(evaluation_id)
-
-    # Assert - Verify question processing
-    assert mock_reasoning_agent.answer_question.call_count == len(sample_benchmark.questions)
-
-    # Verify final evaluation state
-    final_evaluation = mock_evaluation_repository.update.call_args_list[-1][0][0]
-    assert final_evaluation.status == "completed"
-    assert final_evaluation.results is not None
-```
-
-**DTO Validation Tests** (Implemented):
-
-```python
-def test_progress_info_calculations(self, sample_progress_info):
-    # Test completion percentage
-    assert sample_progress_info.completion_percentage == 60.0
-
-    # Test success rate
-    assert sample_progress_info.success_rate == pytest.approx(83.33, rel=1e-2)
-
-    # Test time estimates
-    elapsed = sample_progress_info.elapsed_minutes
-    assert 4.5 <= elapsed <= 5.5
-```
-
-**Error Handling Integration** (Implemented):
-
-```python
-async def test_evaluation_execution_with_external_service_error(self, orchestrator):
-    # Simulate OpenRouter API failure
-    openrouter_error = Exception("503 Service Unavailable")
-    mock_reasoning_agent.answer_question.side_effect = openrouter_error
-
-    # Should raise EvaluationExecutionError due to failures
-    with pytest.raises(EvaluationExecutionError):
-        await orchestrator.execute_evaluation(evaluation_id)
-```
-
-**Repository Tests**:
-
-```python
-def test_evaluation_repository_persistence():
-    repo = EvaluationRepositoryImpl(db_session)
-
-    evaluation = Evaluation.create(agent_config, benchmark_id)
-    repo.save(evaluation)
-
-    retrieved = repo.get_by_id(evaluation.evaluation_id)
-    assert retrieved.agent_config.equals(evaluation.agent_config)
-```
-
-**OpenRouter Integration Tests**:
-
-```python
-async def test_openrouter_error_mapping():
-    client = OpenRouterClient(test_config)
-    mapper = OpenRouterErrorMapper()
-
-    rate_limit_error = RateLimitError("Rate limit exceeded")
-    failure_reason = mapper.map_to_failure_reason(rate_limit_error)
-
-    assert failure_reason.category == FailureCategory.RATE_LIMIT_EXCEEDED
-    assert failure_reason.recoverable == True
-```
-
-### 3. Acceptance Tests (End-to-End) ✅ IMPLEMENTED
-
-**Focus**: Complete user workflows and CLI interface
-
-**Implemented Test Structure**:
-
-```
-tests/acceptance/
-├── test_cli_basic.py           # Basic CLI functionality and help
-├── test_health_command.py      # Health check command testing
-├── test_benchmark_commands.py  # Benchmark list/show commands
-└── test_evaluate_commands.py   # Comprehensive evaluate command testing
-```
-
-**CLI Testing Coverage**: 11 comprehensive test scenarios covering create/run/list workflows, error handling, filtering, and integration patterns.
-
-**Research Workflow Tests**:
+### Complete Evaluation Workflows
 
 ```python
 def test_complete_evaluation_workflow():
-    """Test researcher journey from creation to results"""
+    """Given agent config, when running evaluation, then results saved to database"""
     runner = CliRunner()
 
-    # Create evaluation
+    # Create evaluation via CLI
     create_result = runner.invoke(cli, [
         'evaluate', 'create',
         '--agent', 'cot',
@@ -205,86 +166,128 @@ def test_complete_evaluation_workflow():
         '--benchmark', 'GPQA'
     ])
     assert create_result.exit_code == 0
-
     eval_id = extract_evaluation_id(create_result.output)
 
-    # Run evaluation
-    with mock_openrouter_responses():
+    # Run evaluation with mocked LLM responses
+    with mock_llm_client_factory():
         run_result = runner.invoke(cli, ['evaluate', 'run', eval_id])
         assert run_result.exit_code == 0
         assert "Completed:" in run_result.output
 
-    # List evaluations
+    # Verify results persisted in database
     list_result = runner.invoke(cli, ['evaluate', 'list'])
     assert eval_id in list_result.output
 ```
 
-**CLI Error Handling Tests**:
+### Multi-Provider Client Integration
 
 ```python
-def test_cli_authentication_failure():
-    with mock_authentication_failure():
+@patch.object(LLMClientFactory, 'create_client')
+async def test_openrouter_provider_selection(mock_create_client, orchestrator):
+    """Given OpenRouter provider, when executing evaluation, then OpenRouter client created"""
+
+    mock_client = AsyncMock(spec=LLMClient)
+    mock_client.chat_completion.return_value = LLMResponse(
+        content='{"answer": "Paris"}',
+        structured_data={"answer": "Paris"}
+    )
+    mock_create_client.return_value = mock_client
+
+    agent_config = AgentConfig(
+        agent_type="cot",
+        model_name="anthropic/claude-3-sonnet",
+        provider="openrouter"
+    )
+
+    await orchestrator.execute_evaluation(evaluation_id)
+
+    # Verify factory called with OpenRouter provider
+    mock_create_client.assert_called_with(
+        model_name="anthropic/claude-3-sonnet",
+        provider="openrouter",
+        parsing_strategy="auto"
+    )
+```
+
+### Parser Strategy Selection
+
+```python
+@patch.object(OpenRouterClient, 'chat_completion')
+async def test_outlines_parser_uses_response_format(mock_chat):
+    """Given PARSING_STRATEGY=outlines, when calling API, then uses response_format"""
+
+    mock_chat.return_value = LLMResponse(
+        content='{"answer": "Test"}',
+        structured_data={"answer": "Test"}
+    )
+
+    # Create real factory with outlines strategy
+    factory = LLMClientFactoryImpl(
+        provider_configs={"openrouter": {"api_key": api_key, "base_url": base_url}},
+        default_provider="openrouter",
+        default_parsing_strategy="outlines"
+    )
+    client = factory.create_client(
+        model_name="anthropic/claude-3-sonnet",
+        provider="openrouter",
+        parsing_strategy="outlines"
+    )
+
+    await client.chat_completion(messages, model="anthropic/claude-3-sonnet")
+
+    # Verify Outlines uses response_format
+    call_kwargs = mock_chat.call_args[1]
+    assert 'response_format' in call_kwargs
+    assert call_kwargs['response_format']['type'] == 'json_schema'
+```
+
+### Error Translation Across ACL Boundaries
+
+```python
+async def test_api_error_to_failure_reason_translation():
+    """Given API error, when processing question, then FailureReason saved to database"""
+
+    # Simulate rate limit error from OpenRouter
+    with mock_rate_limit_error():
         runner = CliRunner()
-        result = runner.invoke(cli, ['evaluate', 'run', 'eval_123'])
+        result = runner.invoke(cli, ['evaluate', 'run', evaluation_id])
 
-        assert result.exit_code == 4  # Authentication error code
-        assert "authentication failed" in result.output.lower()
+    # Verify error translated to domain FailureReason
+    evaluation = get_evaluation_from_db(evaluation_id)
+    assert evaluation.status == "failed"
+    assert evaluation.failure_reason.category == "rate_limit_exceeded"
+    assert evaluation.failure_reason.recoverable == True
 ```
 
-## Non-Deterministic Response Testing
-
-### Reasoning Pattern Validation
+### Repository Persistence Integration
 
 ```python
-def test_chain_of_thought_pattern():
-    """Validate CoT responses contain reasoning steps"""
-    cot_agent = ChainOfThoughtAgent(mock_client)
+def test_evaluation_question_result_persistence():
+    """Given evaluation execution, when questions processed, then individual results saved"""
 
-    answer = await cot_agent.process_question(question, config)
+    repo = EvaluationQuestionResultRepositoryImpl(db_session)
+    orchestrator = create_orchestrator_with_mocked_llm()
 
-    # Validate reasoning structure
-    assert answer.reasoning_trace.approach_type == "chain_of_thought"
-    assert len(answer.reasoning_trace.reasoning_text) > 0
+    # Execute evaluation
+    await orchestrator.execute_evaluation(evaluation_id)
 
-    # Check for reasoning indicators
-    reasoning_text = answer.reasoning_trace.reasoning_text.lower()
-    reasoning_indicators = ["step", "first", "then", "therefore"]
-    assert any(indicator in reasoning_text for indicator in reasoning_indicators)
-
-def test_none_agent_pattern():
-    """Validate None approach has empty reasoning"""
-    none_agent = NoneAgent(mock_client)
-
-    answer = await none_agent.process_question(question, config)
-
-    assert answer.reasoning_trace.approach_type == "none"
-    assert answer.reasoning_trace.reasoning_text == ""
-```
-
-### Answer Extraction Testing
-
-```python
-def test_answer_extraction_patterns():
-    """Test various answer formats are properly extracted"""
-    test_cases = [
-        ("The answer is 42", "42"),
-        ("Therefore, the result is 3.14", "3.14"),
-        ("Answer: Paris", "Paris"),
-        ("42", "42"),  # Already clean
-    ]
-
-    for raw_response, expected_clean in test_cases:
-        extracted = extract_answer(raw_response)
-        assert extracted == expected_clean
+    # Verify individual question results persisted
+    results = repo.get_by_evaluation_id(evaluation_id)
+    assert len(results) == 10  # All questions saved
+    assert all(r.is_correct is not None for r in results)
+    assert all(r.execution_time > 0 for r in results)
 ```
 
 ## Test Data and Mocking
 
-### Essential Fixtures
+### Quality Gates Test Fixtures
+
+**Focus**: Simple domain objects, no external dependencies
 
 ```python
 @pytest.fixture
 def sample_agent_config():
+    """Domain value object for testing business rules"""
     return AgentConfig(
         agent_type="chain_of_thought",
         model_name="anthropic/claude-3-sonnet",
@@ -292,105 +295,178 @@ def sample_agent_config():
     )
 
 @pytest.fixture
-def sample_benchmark():
-    questions = [
+def sample_evaluation():
+    """Domain entity for testing state transitions"""
+    return Evaluation.create(
+        agent_config=sample_agent_config(),
+        preprocessed_benchmark_id=uuid4()
+    )
+
+@pytest.fixture
+def sample_questions():
+    """Value objects for testing domain logic"""
+    return [
         Question(id="1", text="What is 2+2?", expected_answer="4"),
         Question(id="2", text="Capital of France?", expected_answer="Paris")
     ]
-    return PreprocessedBenchmark.create("TEST_BENCHMARK", questions)
+```
 
+### BDD Test Fixtures
+
+**Focus**: Integration fixtures with mocked external systems
+
+```python
 @pytest.fixture
 def test_database():
+    """In-memory database for integration testing"""
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     yield sessionmaker(bind=engine)
     Base.metadata.drop_all(engine)
+
+@pytest.fixture
+def mock_llm_client_factory():
+    """Factory returning mocked LLM clients"""
+    with patch.object(LLMClientFactory, 'create_client') as mock:
+        mock_client = AsyncMock(spec=LLMClient)
+        mock_client.chat_completion.return_value = LLMResponse(
+            content='{"answer": "Paris"}',
+            structured_data={"answer": "Paris"}
+        )
+        mock.return_value = mock_client
+        yield mock
+
+@pytest.fixture
+def orchestrator_with_mocks(test_database, mock_llm_client_factory):
+    """Fully configured orchestrator for workflow testing"""
+    return EvaluationOrchestrator(
+        evaluation_repository=EvaluationRepositoryImpl(test_database),
+        question_result_repository=QuestionResultRepositoryImpl(test_database),
+        llm_client_factory=mock_llm_client_factory,
+        domain_service_registry=create_domain_service_registry()
+    )
 ```
 
-### OpenRouter Mocking Strategy
+### LLM Client Factory Mocking Strategy
 
-**Mock at Client Interface Level**: Mock `OpenRouterClient.chat_completion()` method to control LLM responses while testing real parsing logic.
+**Mock at Factory Level**: Mock `LLMClientFactory.create_client()` to return controlled clients while testing orchestration logic.
 
 ```python
-# Mock OpenRouterClient to return controlled LLMResponse objects
-@patch.object(OpenRouterClient, 'chat_completion')
-async def test_parsing_strategy_selection(mock_chat):
-    """Test that PARSING_STRATEGY environment variable controls parser selection"""
+# Mock LLMClientFactory to return controlled client implementations
+@patch.object(LLMClientFactory, 'create_client')
+async def test_multi_provider_orchestration(mock_create_client, orchestrator):
+    """Test evaluation orchestration with factory-created clients"""
 
-    # Arrange - Control what the "LLM" returns
-    mock_chat.return_value = LLMResponse(
+    # Arrange - Mock factory returns client with controlled responses
+    mock_client = AsyncMock(spec=LLMClient)
+    mock_client.chat_completion.return_value = LLMResponse(
         content='{"answer": "Paris"}',
         structured_data={"answer": "Paris"},
-        has_structured_data=lambda: True,
-        usage={"total_tokens": 50}
+        has_structured_data=lambda: True
+    )
+    mock_create_client.return_value = mock_client
+
+    # Act - Orchestrator uses factory to create client based on agent config
+    result = await orchestrator.execute_evaluation(evaluation_id)
+
+    # Assert - Verify factory was called with correct parameters
+    mock_create_client.assert_called_once_with(
+        model_name="anthropic/claude-3-sonnet",
+        provider="openrouter",
+        parsing_strategy="auto"
+    )
+    assert result.status == "completed"
+```
+
+**For Provider-Specific Testing**: Mock at provider client level to test provider integration:
+
+```python
+@patch.object(OpenRouterClient, 'chat_completion')
+async def test_openrouter_provider_integration(mock_chat):
+    """Test OpenRouter-specific client behavior"""
+
+    mock_chat.return_value = LLMResponse(
+        content='{"answer": "Paris"}',
+        structured_data={"answer": "Paris"}
     )
 
-    # Act - Test real parser selection with environment variable
-    with patch.dict(os.environ, {'PARSING_STRATEGY': 'outlines'}):
-        config = get_config()
-        service = ReasoningInfrastructureService(
-            llm_client=real_openrouter_client,
-            error_mapper=real_error_mapper,
-            api_key="test-key",
-            base_url="https://test.com",
-            parsing_strategy=config.parsing_strategy
-        )
+    # Test with real factory, mocked provider
+    factory = LLMClientFactoryImpl(
+        provider_configs={"openrouter": {"api_key": "test-key", "base_url": "https://test.com"}},
+        default_provider="openrouter"
+    )
+    client = factory.create_client(
+        model_name="anthropic/claude-3-sonnet",
+        provider="openrouter",
+        parsing_strategy="outlines"
+    )
 
-        result = await service.execute_reasoning(domain_service, question, agent_config)
+    result = await client.chat_completion(messages, model="anthropic/claude-3-sonnet")
 
-    # Assert - Verify behavior, not just types
-    assert isinstance(result, Answer)
-    assert result.extracted_answer == "Paris"
-
-    # Verify correct client was used (inspect call patterns)
+    # Verify provider-specific behavior
     assert mock_chat.called
     call_kwargs = mock_chat.call_args[1]
-    # OutlinesClient should use response_format for structured output
-    assert 'response_format' in call_kwargs
+    assert 'response_format' in call_kwargs  # Outlines strategy
 ```
 
 **Key Principles**:
-- **Mock External Boundaries**: Mock `OpenRouterClient.chat_completion()` to control LLM responses
-- **Test Real Logic**: Let actual parser selection, error handling, and config integration run
-- **Verify Behavior**: Test what the system does, not internal type checking
-- **Environment Integration**: Test that `PARSING_STRATEGY` actually affects parser selection
+- **Mock at Factory Boundary**: Mock `LLMClientFactory.create_client()` for orchestration tests
+- **Mock at Provider Boundary**: Mock provider clients (OpenRouterClient, etc.) for integration tests
+- **Test Real Logic**: Factory selection logic, parsing strategy application, error handling
+- **Verify Configuration**: Test that model/provider/strategy combinations work correctly
 
 ### Structured Output Parsing Testing
 
 **BDD Tests for Parser Behavior**: Focus on testing parsing strategy selection and error handling behavior rather than implementation details.
 
 ```python
-# Test parser selection based on environment configuration
-@patch.object(OpenRouterClient, 'chat_completion')
-async def test_outlines_strategy_uses_response_format(mock_chat):
-    """Given PARSING_STRATEGY=outlines, when processing question, then uses response_format"""
+# Test factory-based parser selection
+@patch.object(LLMClientFactory, 'create_client')
+async def test_outlines_parser_selection(mock_create_client):
+    """Given PARSING_STRATEGY=outlines, when creating client, then uses Outlines parser"""
 
-    mock_chat.return_value = LLMResponse(
+    mock_client = AsyncMock(spec=LLMClient)
+    mock_client.chat_completion.return_value = LLMResponse(
         content='{"answer": "Test answer"}',
-        structured_data={"answer": "Test answer"},
-        has_structured_data=lambda: True
+        structured_data={"answer": "Test answer"}
     )
+    mock_create_client.return_value = mock_client
 
     with patch.dict(os.environ, {'PARSING_STRATEGY': 'outlines'}):
-        result = await reasoning_service.execute_reasoning(domain_service, question, config)
+        config = get_config()
+        orchestrator = create_orchestrator_with_factory(config)
 
-    # Verify OutlinesClient behavior (uses response_format)
-    call_kwargs = mock_chat.call_args[1]
-    assert 'response_format' in call_kwargs
-    assert call_kwargs['response_format']['type'] == 'json_schema'
+        result = await orchestrator.execute_evaluation(eval_id)
+
+    # Verify factory was called with outlines strategy
+    mock_create_client.assert_called_with(
+        model_name=ANY,
+        provider="openrouter",
+        parsing_strategy="outlines"
+    )
 
 @patch.object(OpenRouterClient, 'chat_completion')
 async def test_marvin_strategy_uses_internal_agent_type(mock_chat):
-    """Given PARSING_STRATEGY=marvin, when processing question, then uses _internal_agent_type"""
+    """Given MarvinClient, when calling API, then uses _internal_agent_type"""
 
     mock_chat.return_value = LLMResponse(
         content='Direct response',
-        structured_data={"answer": "Test answer"},
-        has_structured_data=lambda: True
+        structured_data={"answer": "Test answer"}
     )
 
-    with patch.dict(os.environ, {'PARSING_STRATEGY': 'marvin'}):
-        result = await reasoning_service.execute_reasoning(domain_service, question, config)
+    # Create real factory to test Marvin parser integration
+    factory = LLMClientFactoryImpl(
+        provider_configs={"openrouter": {"api_key": "test-key", "base_url": "https://test.com"}},
+        default_provider="openrouter",
+        default_parsing_strategy="marvin"
+    )
+    client = factory.create_client(
+        model_name="anthropic/claude-3-sonnet",
+        provider="openrouter",
+        parsing_strategy="marvin"
+    )
+
+    await client.chat_completion(messages, model="anthropic/claude-3-sonnet")
 
     # Verify MarvinClient behavior (uses _internal_agent_type)
     call_kwargs = mock_chat.call_args[1]
@@ -418,13 +494,14 @@ async def test_parser_exception_translation_to_failure_reason(mock_chat):
 ```
 
 **What NOT to Mock**:
-- ❌ `OutputParserFactory` creation logic
-- ❌ Parser selection based on model capabilities
+- ❌ `LLMClientFactory.create_client()` logic (test real factory when possible)
+- ❌ Parser selection based on strategy configuration
 - ❌ Environment variable configuration loading
 - ❌ Error translation from `ParserException` to `FailureReason`
 
 **What TO Mock**:
-- ✅ `OpenRouterClient.chat_completion()` responses
+- ✅ `LLMClientFactory.create_client()` return value for orchestration tests
+- ✅ Provider clients (`OpenRouterClient.chat_completion()`) for integration tests
 - ✅ Database operations
 - ✅ File system operations
 
@@ -477,34 +554,46 @@ class EvaluationFactory:
 
 ## Test Execution Strategy
 
-### Test Categories
+### Dual Execution Modes
 
-- **Unit Tests**: Fast, isolated tests (< 30 seconds total)
-- **Integration Tests**: Service coordination and database tests
-- **Acceptance Tests**: End-to-end CLI workflows
+**Quality Gates (`make quality-gates`)**:
+- **Execution time**: < 30 seconds total
+- **When to run**: Before every commit (required), during active development
+- **Components**:
+  - mypy (type checking)
+  - black (formatting)
+  - ruff (linting)
+  - pytest -m unit (domain layer only)
+- **Focus**: Code quality, architectural patterns, domain logic
+
+**BDD Tests (`make bdd-tests`)**:
+- **Execution time**: 2-5 minutes total
+- **When to run**: Before pull requests (required), after architectural changes
+- **Components**:
+  - pytest (all integration and acceptance tests)
+  - Complete workflow validation
+  - Cross-layer integration
+- **Focus**: System behavior, user workflows, data persistence
 
 ### Coverage Goals
 
-- Domain Layer: 95% minimum ✅ (achieved with comprehensive unit tests)
-- Application Services: 90% minimum ✅ (achieved with pragmatic high-value testing)
-- Infrastructure Layer: 80% minimum ✅ (achieved with repository and integration tests)
-- Overall Project: 90% target ✅ (427 tests passing across all layers)
+**Quality Gates Coverage**:
+- Domain entities: 95% minimum (business rules, state transitions)
+- Domain services: 90% minimum (factory logic, validation)
+- Value objects: 100% (equality, categorization, validation)
+
+**BDD Tests Coverage**:
+- Application orchestration: 90% minimum (workflow coordination)
+- Infrastructure integration: 80% minimum (repository, API clients)
+- CLI commands: 95% minimum (user-facing features)
+
+**Overall**: 90% project coverage target with dual approach ensuring both code quality and behavior validation
 
 ### Current Testing Status
 
-**Test Results**: 427 tests passing with full quality gate compliance:
-
-- ✅ **pytest**: All tests passing
-- ✅ **mypy**: Type checking clean
-- ✅ **black**: Code formatting compliant
-- ✅ **ruff**: Linting passed
-
-**Implementation Notes**:
-
-- **Pragmatic Approach**: Focused on high-value scenarios for application services rather than exhaustive coverage
-- **Async Testing**: Proper AsyncMock usage for evaluation execution workflows
-- **Integration Patterns**: Service coordination testing with mocked external dependencies
-- **Error Handling**: Comprehensive error mapping and failure scenario testing
+- ✅ **Quality Gates**: Passing (mypy, black, ruff, domain unit tests)
+- ⚠️ **BDD Tests**: 4/8 failing (requires factory architecture implementation)
+- 📋 **Action Required**: Implement LLMClientFactory to fix BDD test failures
 
 ## See Also
 
