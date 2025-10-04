@@ -4,9 +4,9 @@ This module implements proper BDD testing for structured output parsing:
 - Tests parser selection based on PARSING_STRATEGY environment variable
 - Tests real error translation from ParserException to FailureReason
 - Tests configuration integration and parser behavior
-- Mocks at OpenRouterClient level, not LLMClient level
+- Mocks at LLMClientFactory level, not individual client level
 
-Key principle: Mock external boundaries (OpenRouter API), test internal logic.
+Key principle: Mock external boundaries (factory.create_client()), test internal logic.
 """
 
 import os
@@ -25,8 +25,8 @@ from ml_agents_v2.core.domain.value_objects.answer import (
 )
 from ml_agents_v2.core.domain.value_objects.failure_reason import FailureReason
 from ml_agents_v2.core.domain.value_objects.question import Question
-from ml_agents_v2.infrastructure.openrouter.client import OpenRouterClient
 from ml_agents_v2.infrastructure.openrouter.error_mapper import OpenRouterErrorMapper
+from ml_agents_v2.infrastructure.parsing_factory import LLMClientFactory
 from ml_agents_v2.infrastructure.reasoning_service import ReasoningInfrastructureService
 
 
@@ -63,20 +63,23 @@ class TestParsingStrategySelection:
         self, sample_question, sample_agent_config, domain_service
     ):
         """Given PARSING_STRATEGY=outlines, when processing question, then uses response_format"""
-        # Arrange - Create mock OpenRouter client that doesn't make real API calls
-        mock_openrouter_client = Mock(spec=OpenRouterClient)
-        mock_openrouter_client.chat_completion.return_value = ParsedResponse(
+        # Arrange - Mock LLM client created by factory
+        mock_llm_client = Mock()
+        mock_llm_client.chat_completion.return_value = ParsedResponse(
             content='{"answer": "Paris"}', structured_data={"answer": "Paris"}
         )
+
+        # Mock factory to return our mock client
+        mock_factory = Mock(spec=LLMClientFactory)
+        mock_factory.create_client.return_value = mock_llm_client
+        mock_factory.get_output_model.return_value = Mock()
 
         # Act - Test with outlines strategy
         with patch.dict(os.environ, {"PARSING_STRATEGY": "outlines"}):
             config = get_config()
             service = ReasoningInfrastructureService(
-                llm_client=mock_openrouter_client,
+                llm_client_factory=mock_factory,
                 error_mapper=OpenRouterErrorMapper(),
-                api_key="test-key",
-                base_url="https://test.com",
                 parsing_strategy=config.parsing_strategy,
             )
 
@@ -88,9 +91,14 @@ class TestParsingStrategySelection:
         assert isinstance(result, Answer)
         assert result.extracted_answer == "Paris"
 
+        # Verify factory was called with model name and strategy
+        mock_factory.create_client.assert_called_once_with(
+            model_name=sample_agent_config.model_name, strategy="outlines"
+        )
+
         # Verify OutlinesClient was used (should call with response_format)
-        mock_openrouter_client.chat_completion.assert_called_once()
-        call_kwargs = mock_openrouter_client.chat_completion.call_args[1]
+        mock_llm_client.chat_completion.assert_called_once()
+        call_kwargs = mock_llm_client.chat_completion.call_args[1]
         assert "response_format" in call_kwargs
         assert call_kwargs["response_format"]["type"] == "json_schema"
 
@@ -98,20 +106,23 @@ class TestParsingStrategySelection:
         self, sample_question, sample_agent_config, domain_service
     ):
         """Given PARSING_STRATEGY=marvin, when processing question, then uses _internal_agent_type"""
-        # Arrange - Create mock OpenRouter client
-        mock_openrouter_client = Mock(spec=OpenRouterClient)
-        mock_openrouter_client.chat_completion.return_value = ParsedResponse(
+        # Arrange - Mock LLM client created by factory
+        mock_llm_client = Mock()
+        mock_llm_client.chat_completion.return_value = ParsedResponse(
             content="Paris", structured_data={"answer": "Paris"}
         )
+
+        # Mock factory to return our mock client
+        mock_factory = Mock(spec=LLMClientFactory)
+        mock_factory.create_client.return_value = mock_llm_client
+        mock_factory.get_output_model.return_value = Mock()
 
         # Act - Test with marvin strategy
         with patch.dict(os.environ, {"PARSING_STRATEGY": "marvin"}):
             config = get_config()
             service = ReasoningInfrastructureService(
-                llm_client=mock_openrouter_client,
+                llm_client_factory=mock_factory,
                 error_mapper=OpenRouterErrorMapper(),
-                api_key="test-key",
-                base_url="https://test.com",
                 parsing_strategy=config.parsing_strategy,
             )
 
@@ -123,9 +134,14 @@ class TestParsingStrategySelection:
         assert isinstance(result, Answer)
         assert result.extracted_answer == "Paris"
 
+        # Verify factory was called with model name and strategy
+        mock_factory.create_client.assert_called_once_with(
+            model_name=sample_agent_config.model_name, strategy="marvin"
+        )
+
         # Verify MarvinClient was used (should call with _internal_agent_type)
-        mock_openrouter_client.chat_completion.assert_called_once()
-        call_kwargs = mock_openrouter_client.chat_completion.call_args[1]
+        mock_llm_client.chat_completion.assert_called_once()
+        call_kwargs = mock_llm_client.chat_completion.call_args[1]
         assert "_internal_agent_type" in call_kwargs
         assert call_kwargs["_internal_agent_type"] == "none"
         assert "response_format" not in call_kwargs
@@ -134,11 +150,16 @@ class TestParsingStrategySelection:
         self, sample_question, domain_service
     ):
         """Given PARSING_STRATEGY=auto, when processing question, then selects parser based on model"""
-        # Arrange - Create mock OpenRouter client
-        mock_openrouter_client = Mock(spec=OpenRouterClient)
-        mock_openrouter_client.chat_completion.return_value = ParsedResponse(
+        # Arrange - Mock LLM client created by factory
+        mock_llm_client = Mock()
+        mock_llm_client.chat_completion.return_value = ParsedResponse(
             content='{"answer": "Paris"}', structured_data={"answer": "Paris"}
         )
+
+        # Mock factory to return our mock client
+        mock_factory = Mock(spec=LLMClientFactory)
+        mock_factory.create_client.return_value = mock_llm_client
+        mock_factory.get_output_model.return_value = Mock()
 
         # Test with gpt-4 (supports logprobs) - should use StructuredLogProbsClient
         gpt4_config = AgentConfig(
@@ -152,10 +173,8 @@ class TestParsingStrategySelection:
         with patch.dict(os.environ, {"PARSING_STRATEGY": "auto"}):
             config = get_config()
             service = ReasoningInfrastructureService(
-                llm_client=mock_openrouter_client,
+                llm_client_factory=mock_factory,
                 error_mapper=OpenRouterErrorMapper(),
-                api_key="test-key",
-                base_url="https://test.com",
                 parsing_strategy=config.parsing_strategy,
             )
 
@@ -163,9 +182,14 @@ class TestParsingStrategySelection:
                 domain_service, sample_question, gpt4_config
             )
 
-        # Assert - For gpt-4, should use StructuredLogProbsClient (response_format + logprobs)
+        # Assert - For gpt-4, factory should be called with gpt-4 model name
         assert isinstance(result, Answer)
-        call_kwargs = mock_openrouter_client.chat_completion.call_args[1]
+        mock_factory.create_client.assert_called_once_with(
+            model_name="gpt-4", strategy="auto"
+        )
+
+        # StructuredLogProbsClient should use response_format + logprobs
+        call_kwargs = mock_llm_client.chat_completion.call_args[1]
         assert "response_format" in call_kwargs
         assert "logprobs" in call_kwargs
         assert call_kwargs["logprobs"] is True
@@ -200,19 +224,22 @@ class TestParserErrorTranslation:
     async def test_empty_response_becomes_parsing_error(
         self, sample_question, sample_agent_config, domain_service
     ):
-        """Given OpenRouter returns empty content, when execute_reasoning, then returns FailureReason"""
-        # Arrange - Create mock that simulates empty response
-        mock_openrouter_client = Mock(spec=OpenRouterClient)
-        mock_openrouter_client.chat_completion.return_value = ParsedResponse(
+        """Given LLM returns empty content, when execute_reasoning, then returns FailureReason"""
+        # Arrange - Mock LLM client that returns empty response
+        mock_llm_client = Mock()
+        mock_llm_client.chat_completion.return_value = ParsedResponse(
             content="",  # This will trigger validation error in ParsedResponse
             structured_data=None,
         )
 
+        # Mock factory to return our mock client
+        mock_factory = Mock(spec=LLMClientFactory)
+        mock_factory.create_client.return_value = mock_llm_client
+        mock_factory.get_output_model.return_value = Mock()
+
         service = ReasoningInfrastructureService(
-            llm_client=mock_openrouter_client,
+            llm_client_factory=mock_factory,
             error_mapper=OpenRouterErrorMapper(),
-            api_key="test-key",
-            base_url="https://test.com",
             parsing_strategy="marvin",
         )
 
@@ -233,18 +260,19 @@ class TestParserErrorTranslation:
     async def test_api_exception_becomes_failure_reason(
         self, sample_question, sample_agent_config, domain_service
     ):
-        """Given OpenRouter throws exception, when execute_reasoning, then returns FailureReason"""
-        # Arrange - Create mock that throws exception
-        mock_openrouter_client = Mock(spec=OpenRouterClient)
-        mock_openrouter_client.chat_completion.side_effect = Exception(
-            "API connection failed"
-        )
+        """Given LLM client throws exception, when execute_reasoning, then returns FailureReason"""
+        # Arrange - Mock LLM client that throws exception
+        mock_llm_client = Mock()
+        mock_llm_client.chat_completion.side_effect = Exception("API connection failed")
+
+        # Mock factory to return our mock client
+        mock_factory = Mock(spec=LLMClientFactory)
+        mock_factory.create_client.return_value = mock_llm_client
+        mock_factory.get_output_model.return_value = Mock()
 
         service = ReasoningInfrastructureService(
-            llm_client=mock_openrouter_client,
+            llm_client_factory=mock_factory,
             error_mapper=OpenRouterErrorMapper(),
-            api_key="test-key",
-            base_url="https://test.com",
             parsing_strategy="outlines",
         )
 
@@ -275,11 +303,10 @@ class TestConfigurationIntegration:
         """Given PARSING_STRATEGY=marvin in environment, when creating service, then strategy is passed"""
         # Act
         config = get_config()
+        mock_factory = Mock(spec=LLMClientFactory)
         service = ReasoningInfrastructureService(
-            llm_client=Mock(),
+            llm_client_factory=mock_factory,
             error_mapper=Mock(),
-            api_key="test",
-            base_url="https://test.com",
             parsing_strategy=config.parsing_strategy,
         )
 

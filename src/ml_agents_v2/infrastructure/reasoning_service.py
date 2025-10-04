@@ -4,7 +4,6 @@ import time
 from datetime import datetime
 from typing import Any
 
-from ..core.domain.services.llm_client import LLMClient
 from ..core.domain.services.reasoning.reasoning_agent_service import (
     ReasoningAgentService,
 )
@@ -14,7 +13,7 @@ from ..core.domain.value_objects.failure_reason import FailureReason
 from ..core.domain.value_objects.question import Question
 from .exceptions import ParserException
 from .openrouter.error_mapper import OpenRouterErrorMapper
-from .parsing_factory import InstructorParser, OutputParserFactory
+from .parsing_factory import InstructorParser, LLMClientFactory
 
 
 class ReasoningInfrastructureService:
@@ -22,22 +21,13 @@ class ReasoningInfrastructureService:
 
     def __init__(
         self,
-        llm_client: LLMClient,
+        llm_client_factory: LLMClientFactory,
         error_mapper: OpenRouterErrorMapper,
-        api_key: str,
-        base_url: str,
         parsing_strategy: str = "auto",
     ):
-        self.llm_client = llm_client
+        self.llm_client_factory = llm_client_factory
         self.error_mapper = error_mapper
         self.parsing_strategy = parsing_strategy
-        # Create factory with API credentials
-        self.parser_factory = OutputParserFactory(api_key, base_url)
-        # Create client based on strategy (will be overridden per-question if needed)
-        structured_client = self.parser_factory.create_client(
-            "default", strategy=parsing_strategy
-        )
-        self.parser = InstructorParser(structured_client)
 
     async def execute_reasoning(
         self,
@@ -50,14 +40,21 @@ class ReasoningInfrastructureService:
             # Domain: Get prompt strategy and generate prompt
             prompt = domain_service.process_question(question, config)
 
+            # Infrastructure: Create client for this specific model
+            llm_client = self.llm_client_factory.create_client(
+                model_name=config.model_name,
+                strategy=self.parsing_strategy,
+            )
+            parser = InstructorParser(llm_client)
+
             # Infrastructure: Get output model and parse with structured output
-            output_model = self.parser_factory.get_output_model(
+            output_model = self.llm_client_factory.get_output_model(
                 domain_service.get_agent_type()
             )
 
             # Infrastructure: Parse with structured output
             start_time = time.time()
-            parse_result = await self.parser.parse(output_model, prompt, config)
+            parse_result = await parser.parse(output_model, prompt, config)
             execution_time = time.time() - start_time
 
             # Domain: Process structured data into domain result

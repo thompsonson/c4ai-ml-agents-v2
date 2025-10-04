@@ -19,8 +19,8 @@ from .outlines import OutlinesClient
 from .structured_logprobs import StructuredLogProbsClient
 
 
-class OutputParserFactory:
-    """Factory for creating appropriate structured output client based on model capabilities."""
+class LLMClientFactory:
+    """Factory for creating appropriate LLM client based on model capabilities."""
 
     def __init__(self, api_key: str, base_url: str = "https://openrouter.ai/api/v1"):
         """Initialize factory with API credentials.

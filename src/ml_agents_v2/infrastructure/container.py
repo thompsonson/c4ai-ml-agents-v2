@@ -32,6 +32,7 @@ from ml_agents_v2.infrastructure.health import HealthChecker
 from ml_agents_v2.infrastructure.logging_config import configure_logging
 from ml_agents_v2.infrastructure.openrouter.client import OpenRouterClient
 from ml_agents_v2.infrastructure.openrouter.error_mapper import OpenRouterErrorMapper
+from ml_agents_v2.infrastructure.parsing_factory import LLMClientFactory
 from ml_agents_v2.infrastructure.reasoning_service import ReasoningInfrastructureService
 
 
@@ -99,12 +100,16 @@ class Container(containers.DeclarativeContainer):
         OpenRouterErrorMapper,
     )
 
-    reasoning_infrastructure_service = providers.Singleton(
-        ReasoningInfrastructureService,
-        llm_client=openrouter_client,  # OpenRouterClient implements LLMClient
-        error_mapper=openrouter_error_mapper,
+    llm_client_factory = providers.Singleton(
+        LLMClientFactory,
         api_key=config.provided.openrouter_api_key,
         base_url=config.provided.openrouter_base_url,
+    )
+
+    reasoning_infrastructure_service = providers.Singleton(
+        ReasoningInfrastructureService,
+        llm_client_factory=llm_client_factory,
+        error_mapper=openrouter_error_mapper,
         parsing_strategy=config.provided.parsing_strategy,
     )
 
