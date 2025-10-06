@@ -20,7 +20,7 @@ import pytest
 from ml_agents_v2.core.domain.services.llm_client import LLMClient, ParsedResponse
 from ml_agents_v2.core.domain.value_objects.agent_config import AgentConfig
 from ml_agents_v2.core.domain.value_objects.question import Question
-from ml_agents_v2.infrastructure.models import (
+from ml_agents_v2.infrastructure.models.models import (
     ChainOfThoughtOutput,
     DirectAnswerOutput,
 )

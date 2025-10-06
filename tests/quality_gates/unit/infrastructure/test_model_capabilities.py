@@ -1,6 +1,6 @@
 """Tests for model capabilities registry."""
 
-from ml_agents_v2.infrastructure.model_capabilities import (
+from ml_agents_v2.infrastructure.factories.model_capabilities import (
     ModelCapabilitiesRegistry,
 )
 

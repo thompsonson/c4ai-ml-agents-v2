@@ -6,8 +6,8 @@ import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
 from ml_agents_v2.infrastructure.database.session_manager import DatabaseSessionManager
-from ml_agents_v2.infrastructure.health import HealthChecker, HealthStatus
-from ml_agents_v2.infrastructure.openrouter.client import OpenRouterClient
+from ml_agents_v2.infrastructure.health_checker import HealthChecker, HealthStatus
+from ml_agents_v2.infrastructure.providers import OpenRouterClient
 
 
 class TestHealthStatus:
@@ -319,7 +319,7 @@ class TestHealthChecker:
         result = health_checker._determine_overall_status(checks)
         assert result == "healthy"  # No failures means healthy
 
-    @patch("ml_agents_v2.infrastructure.health.get_logger")
+    @patch("ml_agents_v2.infrastructure.health_checker.get_logger")
     def test_logging_on_database_errors(self, mock_get_logger, health_checker):
         """Test that database errors are properly logged."""
         mock_logger = MagicMock()
@@ -343,7 +343,7 @@ class TestHealthChecker:
             "Database health check failed", error="Test database error"
         )
 
-    @patch("ml_agents_v2.infrastructure.health.get_logger")
+    @patch("ml_agents_v2.infrastructure.health_checker.get_logger")
     def test_logging_on_openrouter_errors(self, mock_get_logger, health_checker):
         """Test that OpenRouter errors are properly logged."""
         mock_logger = MagicMock()
@@ -369,7 +369,9 @@ class TestHealthChecker:
         self, mock_session_manager, mock_openrouter_client
     ):
         """Test that logger is properly initialized during object creation."""
-        with patch("ml_agents_v2.infrastructure.health.get_logger") as mock_get_logger:
+        with patch(
+            "ml_agents_v2.infrastructure.health_checker.get_logger"
+        ) as mock_get_logger:
             mock_logger = MagicMock()
             mock_get_logger.return_value = mock_logger
 
@@ -380,6 +382,6 @@ class TestHealthChecker:
 
             # Verify logger was requested with correct module name
             mock_get_logger.assert_called_once_with(
-                "ml_agents_v2.infrastructure.health"
+                "ml_agents_v2.infrastructure.health_checker"
             )
             assert checker.logger == mock_logger

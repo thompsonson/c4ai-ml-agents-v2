@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ....infrastructure.csv.benchmark_csv_reader import BenchmarkCsvReader
+from ....infrastructure.io.benchmark_csv_reader import BenchmarkCsvReader
 from ...domain.entities.preprocessed_benchmark import PreprocessedBenchmark
 from ...domain.repositories.preprocessed_benchmark_repository import (
     PreprocessedBenchmarkRepository,

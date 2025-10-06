@@ -14,7 +14,7 @@ import pytest
 
 from ml_agents_v2.core.domain.services.llm_client import LLMClient
 from ml_agents_v2.core.domain.value_objects.answer import ParsedResponse
-from ml_agents_v2.infrastructure.openrouter.client import OpenRouterClient
+from ml_agents_v2.infrastructure.providers import OpenRouterClient
 
 
 class MockCompletionUsage:

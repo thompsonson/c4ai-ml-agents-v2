@@ -3,14 +3,20 @@
 This package contains parsing strategies that wrap base LLM clients to add
 structured output capabilities through different approaches (Marvin post-processing,
 Outlines constrained generation, native structured output).
+
+Note: LangChain and Instructor parsers are placeholders (deferred in Phase 9).
 """
 
-from .marvin_parser import MarvinParsingClient
-from .native_parser import NativeParsingClient
-from .outlines_parser import OutlinesParsingClient
+from .instructor import InstructorParsingClient
+from .langchain import LangChainParsingClient
+from .marvin import MarvinParsingClient
+from .native import NativeParsingClient
+from .outlines import OutlinesParsingClient
 
 __all__ = [
     "MarvinParsingClient",
     "NativeParsingClient",
     "OutlinesParsingClient",
+    "LangChainParsingClient",
+    "InstructorParsingClient",
 ]

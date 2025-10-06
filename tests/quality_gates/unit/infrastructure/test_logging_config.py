@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from ml_agents_v2.config.application_config import ApplicationConfig
-from ml_agents_v2.infrastructure.logging_config import configure_logging, get_logger
+from ml_agents_v2.infrastructure.logging_setup import configure_logging, get_logger
 
 
 class TestConfigureLogging:

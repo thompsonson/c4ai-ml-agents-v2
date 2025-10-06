@@ -9,8 +9,8 @@ from typing import Any
 import structlog
 from pydantic import BaseModel
 
-from ...core.domain.services.llm_client import LLMClient
-from ...core.domain.value_objects.answer import ParsedResponse
+from ....core.domain.services.llm_client import LLMClient
+from ....core.domain.value_objects.answer import ParsedResponse
 
 
 class NativeParsingClient(LLMClient):
@@ -39,7 +39,7 @@ class NativeParsingClient(LLMClient):
         Returns:
             Infrastructure Pydantic model for structured output
         """
-        from ..models import ChainOfThoughtOutput, DirectAnswerOutput
+        from ...models.models import ChainOfThoughtOutput, DirectAnswerOutput
 
         mapping: dict[str, type[BaseModel]] = {
             "none": DirectAnswerOutput,

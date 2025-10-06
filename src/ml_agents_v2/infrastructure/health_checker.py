@@ -7,8 +7,8 @@ from pydantic import BaseModel
 from sqlalchemy import text
 
 from ml_agents_v2.infrastructure.database.session_manager import DatabaseSessionManager
-from ml_agents_v2.infrastructure.logging_config import get_logger
-from ml_agents_v2.infrastructure.openrouter.client import OpenRouterClient
+from ml_agents_v2.infrastructure.logging_setup import get_logger
+from ml_agents_v2.infrastructure.providers import OpenRouterClient
 
 
 class HealthStatus(BaseModel):

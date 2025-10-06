@@ -5,7 +5,7 @@ from unittest.mock import patch
 import pytest
 from dependency_injector import providers
 
-from ml_agents_v2.infrastructure.container import Container
+from ml_agents_v2.infrastructure.app_composition_container import Container
 
 
 class TestContainer:

@@ -8,8 +8,8 @@ from typing import Any
 
 import structlog
 
-from ...core.domain.services.llm_client import LLMClient
-from ...core.domain.value_objects.answer import ParsedResponse
+from ....core.domain.services.llm_client import LLMClient
+from ....core.domain.value_objects.answer import ParsedResponse
 
 
 class AnthropicClient(LLMClient):

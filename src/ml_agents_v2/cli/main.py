@@ -3,7 +3,7 @@
 import click
 from rich.console import Console
 
-from ml_agents_v2.infrastructure.container import Container
+from ml_agents_v2.infrastructure.app_composition_container import Container
 
 from .commands.benchmark import benchmark as benchmark_commands
 from .commands.evaluate import evaluate as evaluate_commands

@@ -26,7 +26,9 @@ from ...domain.services.reasoning.reasoning_agent_service import ReasoningAgentS
 from ...domain.value_objects.agent_config import AgentConfig
 
 if TYPE_CHECKING:
-    from ....infrastructure.reasoning_service import ReasoningInfrastructureService
+    from ....infrastructure.acl_reasoning_orchestrator import (
+        ReasoningInfrastructureService,
+    )
 from ...domain.value_objects.answer import Answer
 from ...domain.value_objects.evaluation_results import EvaluationResults
 from ...domain.value_objects.failure_reason import FailureReason

@@ -4,7 +4,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from ml_agents_v2.infrastructure.health import HealthStatus
+from ml_agents_v2.infrastructure.health_checker import HealthStatus
 
 console = Console()
 

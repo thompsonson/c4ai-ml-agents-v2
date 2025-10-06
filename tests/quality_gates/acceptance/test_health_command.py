@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 from click.testing import CliRunner
 
 from ml_agents_v2.cli.main import cli
-from ml_agents_v2.infrastructure.health import HealthStatus
+from ml_agents_v2.infrastructure.health_checker import HealthStatus
 
 
 class TestHealthCommand:

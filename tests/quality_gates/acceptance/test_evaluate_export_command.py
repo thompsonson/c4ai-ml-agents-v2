@@ -213,11 +213,11 @@ class TestEvaluateExportCommand:
                 from ml_agents_v2.core.application.services.evaluation_orchestrator import (
                     EvaluationOrchestrator,
                 )
-                from ml_agents_v2.infrastructure.csv.evaluation_results_csv_writer import (
-                    EvaluationResultsCsvWriter,
-                )
                 from ml_agents_v2.infrastructure.database.repositories.evaluation_question_result_repository_impl import (
                     EvaluationQuestionResultRepositoryImpl,
+                )
+                from ml_agents_v2.infrastructure.io.evaluation_results_csv_writer import (
+                    EvaluationResultsCsvWriter,
                 )
 
                 question_result_repo = EvaluationQuestionResultRepositoryImpl(

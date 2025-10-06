@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from ml_agents_v2.config.application_config import get_config
+from ml_agents_v2.core.domain.services.llm_client import LLMClientFactory
 from ml_agents_v2.core.domain.services.reasoning.none_agent_service import (
     NoneAgentService,
 )
@@ -25,10 +26,10 @@ from ml_agents_v2.core.domain.value_objects.answer import (
 )
 from ml_agents_v2.core.domain.value_objects.failure_reason import FailureReason
 from ml_agents_v2.core.domain.value_objects.question import Question
-from ml_agents_v2.infrastructure.models import DirectAnswerOutput
-from ml_agents_v2.infrastructure.openrouter.error_mapper import OpenRouterErrorMapper
-from ml_agents_v2.infrastructure.parsing_factory import LLMClientFactory
-from ml_agents_v2.infrastructure.reasoning_service import ReasoningInfrastructureService
+from ml_agents_v2.infrastructure.acl_reasoning_orchestrator import (
+    ReasoningInfrastructureService,
+)
+from ml_agents_v2.infrastructure.providers import OpenRouterErrorMapper
 
 
 class TestParsingStrategySelection:
@@ -73,7 +74,6 @@ class TestParsingStrategySelection:
         # Mock factory to return our mock client
         mock_factory = Mock(spec=LLMClientFactory)
         mock_factory.create_client.return_value = mock_llm_client
-        mock_factory.get_output_model.return_value = DirectAnswerOutput
 
         # Act - Test with outlines strategy
         with patch.dict(os.environ, {"PARSING_STRATEGY": "outlines"}):
@@ -115,7 +115,6 @@ class TestParsingStrategySelection:
         # Mock factory to return our mock client
         mock_factory = Mock(spec=LLMClientFactory)
         mock_factory.create_client.return_value = mock_llm_client
-        mock_factory.get_output_model.return_value = DirectAnswerOutput
 
         # Act - Test with marvin strategy
         with patch.dict(os.environ, {"PARSING_STRATEGY": "marvin"}):
@@ -157,7 +156,6 @@ class TestParsingStrategySelection:
         # Mock factory to return our mock client
         mock_factory = Mock(spec=LLMClientFactory)
         mock_factory.create_client.return_value = mock_llm_client
-        mock_factory.get_output_model.return_value = DirectAnswerOutput
 
         # Test with gpt-4 (supports logprobs) - should use StructuredLogProbsClient
         gpt4_config = AgentConfig(
@@ -230,7 +228,6 @@ class TestParserErrorTranslation:
         # Mock factory to return our mock client
         mock_factory = Mock(spec=LLMClientFactory)
         mock_factory.create_client.return_value = mock_llm_client
-        mock_factory.get_output_model.return_value = DirectAnswerOutput
 
         service = ReasoningInfrastructureService(
             llm_client_factory=mock_factory,
@@ -247,9 +244,13 @@ class TestParserErrorTranslation:
         assert isinstance(result, FailureReason)
         assert result.category == "parsing_error"
         assert "failed at" in result.description
+        # Parser type should be the parsing strategy used (marvin, outlines, native, auto)
         assert (
-            "InstructorParser" in result.description
-        )  # Current implementation behavior
+            "marvin" in result.description.lower()
+            or "outlines" in result.description.lower()
+            or "native" in result.description.lower()
+            or "auto" in result.description.lower()
+        ), "Error message should reference parser strategy"
         assert result.recoverable is False
 
     async def test_api_exception_becomes_failure_reason(
@@ -263,7 +264,6 @@ class TestParserErrorTranslation:
         # Mock factory to return our mock client
         mock_factory = Mock(spec=LLMClientFactory)
         mock_factory.create_client.return_value = mock_llm_client
-        mock_factory.get_output_model.return_value = DirectAnswerOutput
 
         service = ReasoningInfrastructureService(
             llm_client_factory=mock_factory,
